@@ -11,3 +11,6 @@ FINDINGS.md
 .DS_Store
 Thumbs.db
 *.log
+
+# the promo video project: holds personal screen recordings and other creators' wallpaper art
+promo/

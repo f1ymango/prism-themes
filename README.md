@@ -11,6 +11,19 @@ the app through its React DevTools extension slot it builds on.
 > **Unofficial.** Prism restyles the app through parts Claude Desktop does not document. An app update can break
 > some of it; Prism is built to turn off only the affected parts, and `/prism doctor` says what it found.
 
+## See it
+
+| Afterschool Rain | Punklorde | Miku |
+| :-: | :-: | :-: |
+| <img src="docs/demo/afterschool-rain.gif" alt="Claude Desktop with a rainy anime street video behind the chat" width="320"> | <img src="docs/demo/punklorde.gif" alt="Claude Desktop with a neon cyberpunk city video behind the chat" width="320"> | <img src="docs/demo/miku.gif" alt="Claude Desktop with an animated Hatsune Miku close-up behind the chat" width="320"> |
+| a video wallpaper, frosted panels | neon effects that react while Claude works | light and dark palettes |
+
+The backgrounds are Wallpaper Engine wallpapers by their own creators, not part of Prism:
+[K-ON RAIN LIVE WALLPAPER](https://steamcommunity.com/sharedfiles/filedetails/?id=2406625656),
+[Punklorde (desktop resolution)](https://steamcommunity.com/sharedfiles/filedetails/?id=3422072291) and
+[初音-AniLuoty](https://steamcommunity.com/sharedfiles/filedetails/?id=3702521609) on the Steam Workshop.
+Prism ships none of them; you point a theme at a file you already have.
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
