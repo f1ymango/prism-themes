@@ -12,7 +12,7 @@ import type { Payload, Theme } from '../core/resolve'
 import { convertV1Css, finalize, fromV1, parseRules, parseTheme } from '../core/schema'
 import type { Draft, Rule } from '../core/schema'
 
-export const VERSION = '0.3.0'
+export const VERSION = '0.4.0'
 export type Tier2State = 'unsupported' | 'missing' | 'restart' | 'active'
 export type Tier2 = { state: Tier2State; slot?: string }
 

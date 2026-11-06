@@ -5,7 +5,8 @@ import type { Palette } from './palette'
 import { BASE_RULES, REACTION_RULES, ROLES, TITLEBAR_CSS, WALL_RULES } from './roles'
 import type { RoleRule } from './roles'
 
-export type Gradient = { kind: 'gradient'; angle: number; stops: string[] }
+/** A gradient; `angle`/`stops` are the dark (or only) one, `light` the one a light variant shows. */
+export type Gradient = { kind: 'gradient'; angle: number; stops: string[]; light?: { angle: number; stops: string[] } }
 export type Status = { idle: string; tool: string; error: string; done: string }
 export type Theme = {
   id: string
@@ -99,6 +100,19 @@ export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | R
   const variants = t?.variants && {
     light: { ...varsOf(t.variants.light), 'prism-controls': t.variants.light.text },
     dark: varsOf(t.variants.dark),
+  }
+  // each variant gets its own background: the light gradient (when the theme has one), and a veil in its own colour
+  if (variants && t?.variants) {
+    const dim = (bg: string) => rgba(bg, Math.max(0, Math.min(0.9, opts.media?.dim ?? 0)))
+    if (opts.media) {
+      variants.light['prism-wall'] = t.variants.light.bg
+      variants.light['prism-dim'] = dim(t.variants.light.bg)
+      variants.dark['prism-wall'] = t.variants.dark.bg
+      variants.dark['prism-dim'] = dim(t.variants.dark.bg)
+    } else if (gradient && t.background?.light) {
+      variants.light['prism-wall'] = gradientCss({ kind: 'gradient', ...t.background.light })
+      variants.dark['prism-wall'] = gradientCss(t.background)
+    }
   }
   const rules = [...(t ? BASE_RULES : []), ...(opts.media || gradient ? WALL_RULES : []), ...REACTION_RULES]
   const css = [mode === 'light' || variants ? TITLEBAR_CSS : '', t?.css ?? ''].filter(Boolean).join('\n')

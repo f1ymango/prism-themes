@@ -41,7 +41,8 @@ export const varsOf = (p: Palette): Record<string, string> => {
   // secondary and muted text keep WCAG AA (4.5:1) against the background, however close the palette's colours are
   const second = towardBg(tx, bg, 0.35, 4.5), muted = towardBg(tx, bg, 0.55, 4.5)
   const hover = at(ac, tx, 0.15), tint = at(bg, ac, 0.15)
-  const on = luma(ac) > 0.55 ? '#000000' : '#ffffff'
+  // text on accent-coloured buttons: black or white, whichever has the higher real (WCAG) contrast
+  const on = contrast([0, 0, 0], ac) >= contrast([1, 1, 1], ac) ? '#000000' : '#ffffff'
   const cds: Record<string, string> = {
     'page-bg': p.bg, 'surface-0': p.bg, 'surface-1': at(bg, tx, 0.03), 'surface-2': at(bg, tx, 0.06), 'surface-3': at(bg, tx, 0.09),
     'neutral-900': p.text, 'neutral-600': second, 'neutral-400': muted,

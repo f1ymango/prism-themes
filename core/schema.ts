@@ -75,11 +75,25 @@ export const parseTheme = (raw: unknown): Parsed => {
   if (raw.background !== undefined) {
     const b = raw.background
     if (isObj(b) && isObj(b.gradient)) {
+      // one gradient, or a light and a dark one (as palettes are written)
+      const one = (g: unknown, at: string) => {
+        const o = isObj(g) ? g : {}
+        const stops = Array.isArray(o.stops) ? o.stops : []
+        if (typeof o.angle === 'number' && stops.length >= 2 && stops.length <= 8 && stops.every(isHex)) {
+          return { angle: o.angle, stops: stops as string[] }
+        }
+        errors.push(`${at}: { angle, stops: 2–8 #rrggbb colours }`)
+        return undefined
+      }
       const g = b.gradient
-      const stops = Array.isArray(g.stops) ? g.stops : []
-      if (typeof g.angle === 'number' && stops.length >= 2 && stops.length <= 8 && stops.every(isHex)) {
-        d.background = { kind: 'gradient', angle: g.angle, stops: stops as string[] }
-      } else errors.push('background.gradient: { angle, stops: 2–8 #rrggbb colours }')
+      if (isObj(g.light) || isObj(g.dark)) {
+        const light = one(g.light, 'background.gradient.light'), dark = one(g.dark, 'background.gradient.dark')
+        if (light && dark) d.background = { kind: 'gradient', ...dark, light }
+        if (raw.palette !== undefined && !d.variants) warnings.push('background.gradient.light: shown only by a theme with light and dark palettes')
+      } else {
+        const only = one(g, 'background.gradient')
+        if (only) d.background = { kind: 'gradient', ...only }
+      }
     } else if (isObj(b) && str(b.file, 1000)) {
       const fit = b.fit === 'contain' ? 'contain' : 'cover'
       const dim = typeof b.dim === 'number' && b.dim >= 0 && b.dim <= 0.9 ? b.dim : 0.25

@@ -80,6 +80,29 @@ test('C6: light and dark variants reach the page as two sets, and no mode is for
   expect(p.css.includes('data-tfc-mode=light')).toBe(true) // the window-button plate waits on the light variant
 })
 
+test('C6: light and dark themes get a background per variant: two gradients, or a veil in each one\'s colour', async () => {
+  const d = ok({
+    schema: 2, id: 'duo-sky',
+    palette: { light: { bg: '#fbf2ea', text: '#2b2140', accent: '#c1306a' }, dark: { bg: '#15142b', text: '#f7ece2', accent: '#ff8fb6' } },
+    background: { gradient: {
+      light: { angle: 165, stops: ['#fdf6ef', '#f6c9d4'] },
+      dark: { angle: 165, stops: ['#0b0c22', '#432a58'] },
+    } },
+  })
+  expect(d.background).toEqual({ kind: 'gradient', angle: 165, stops: ['#0b0c22', '#432a58'], light: { angle: 165, stops: ['#fdf6ef', '#f6c9d4'] } })
+  const theme = finalize('duo-sky', () => d).theme as Theme
+  const p = resolve(theme, { backgroundByPage: true }) as Payload
+  expect(p.vars['prism-wall']).toBe('linear-gradient(165deg, #0b0c22, #432a58)') // when the mode is unknown
+  expect(p.variants?.light['prism-wall']).toBe('linear-gradient(165deg, #fdf6ef, #f6c9d4)')
+  expect(p.variants?.dark['prism-wall']).toBe('linear-gradient(165deg, #0b0c22, #432a58)')
+  const media = { provider: 'video' as const, files: ['prism-assets/bg-00000001.mp4'], interval: 60, fit: 'cover' as const, dim: 0.3 }
+  const v = resolve(theme, { backgroundByPage: false, media }) as Payload
+  expect(v.variants?.light['prism-dim']).toBe('rgba(251, 242, 234, 0.3)')
+  expect(v.variants?.dark['prism-dim']).toBe('rgba(21, 20, 43, 0.3)')
+  const bad = parseTheme({ schema: 2, id: 'half', background: { gradient: { light: { angle: 1, stops: ['#ffffff', '#000000'] } } } })
+  expect(bad.errors).toEqual(['background.gradient.dark: { angle, stops: 2–8 #rrggbb colours }'])
+})
+
 test('C6: a theme\'s own stylesheet, tokens and panels reach the payload; your panels choice wins', async () => {
   const t: Theme = { ...THEMES[0]!, css: 'html[data-tfc-event=tool] body { outline: 1px solid red; }', tokens: { 'cds-radius': '2px' }, panels: 'clear' }
   const media = { provider: 'image' as const, files: ['prism-assets/bg-00000001.jpg'], interval: 60, fit: 'cover' as const, dim: 0.2 }
@@ -96,6 +119,9 @@ test('palettes: secondary and muted text keep 4.5:1 against the background, for 
     const v = varsOf(p)
     for (const k of ['cds-text-secondary', 'cds-text-muted']) expect(contrast(rgb(v[k]!), rgb(p.bg)) >= 4.5).toBe(true)
   }
+  // text on an accent button takes the better of black and white: on this magenta, white is 3.04:1, black 6.9:1
+  expect(varsOf({ bg: '#130f26', text: '#ece8ff', accent: '#ff4fa3' })['cds-on-accent']).toBe('#000000')
+  expect(varsOf({ bg: '#ffffff', text: '#111111', accent: '#1d4ed8' })['cds-on-accent']).toBe('#ffffff')
 })
 
 test('C6: rules — projects by folder pattern, times across midnight, first match wins', async () => {

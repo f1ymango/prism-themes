@@ -65,6 +65,8 @@ Do not write into the themes folder before the person approves a draft.
 
   // a gradient, or a file (relative to this file, or absolute)
   "background": { "gradient": { "angle": 160, "stops": ["#1b1430", "#7a3d5c", "#c0645a"] } },
+  // with light and dark palettes, a gradient for each (a dark sky behind light-mode text would be unreadable):
+  // "background": { "gradient": { "light": { "angle": 165, "stops": [...] }, "dark": { "angle": 165, "stops": [...] } } },
   // "background": { "file": "koi.mp4", "fit": "cover", "dim": 0.3, "interval": 60 },
 
   "panels": "glass",                   // side panels over the background: glass, clear or solid
