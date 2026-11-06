@@ -1,0 +1,7 @@
+{
+  "name": "prism-themes",
+  "version": "0.3.0",
+  "description": "Themes for Claude Desktop: palette, fonts and backgrounds, drawn through the official backdrop API where the app supports it and an optional extension otherwise",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

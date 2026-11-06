@@ -1,0 +1,12 @@
+{
+  "name": "prism-themes",
+  "owner": { "name": "f1ymango" },
+  "description": "Prism Themes for Claude Desktop",
+  "plugins": [
+    {
+      "name": "prism-themes",
+      "source": "./",
+      "description": "Themes for Claude Desktop: palettes, fonts, and image or video backgrounds, with light/dark variants and per-project rules"
+    }
+  ]
+}

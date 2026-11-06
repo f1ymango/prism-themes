@@ -1,0 +1,5 @@
+[
+  { "when": { "project": "C:/Projects/my-app*", "time": "19:00-07:00" }, "use": "harbor" },
+  { "when": { "project": "C:/Projects/my-app*" }, "use": "parchment" },
+  { "when": { "time": "22:00-06:00" }, "use": "night-market" }
+]

@@ -1,0 +1,14 @@
+{
+  "schema": 2,
+  "id": "night-market",
+  "name": "Night Market",
+  "tagline": "Lantern orange on indigo; paper and ink by day",
+  "palette": {
+    "light": { "bg": "#f6f1e7", "text": "#2a2622", "accent": "#b4471f" },
+    "dark": { "bg": "#151a2e", "text": "#efe9df", "accent": "#ff9a4d" }
+  },
+  "shape": { "radius": 10, "composerRadius": 20 },
+  "background": { "gradient": { "angle": 165, "stops": ["#0f1326", "#262a52", "#5a2f4a", "#c4612f"] } },
+  "panels": "glass",
+  "status": { "idle": "🏮 open late", "tool": "🏮 {tool}…", "error": "🏮 {tool} failed", "done": "🏮 done" }
+}

@@ -1,0 +1,13 @@
+# written by Claude Code for the editor; regenerated on load
+.claude-plugin/types/
+
+# private planning notes (local paths and machine details)
+notes/
+ROADMAP.md
+PLANS.md
+FINDINGS.md
+
+# operating system and editor leftovers
+.DS_Store
+Thumbs.db
+*.log
