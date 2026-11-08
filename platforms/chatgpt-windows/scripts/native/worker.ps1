@@ -26,7 +26,7 @@ try {
     if (!$package -or $package.PackageFullName -ne $installation.package) { $outcome='unsupported';throw 'App updated. Run /prism repair to check and adapt to the new build' }
     $image=Join-Path $package.InstallLocation 'app\ChatGPT.exe'
     if ((Get-PrismFileHash $image) -ne $installation.executableSha256 -or (Get-PrismFileHash (Join-Path $package.InstallLocation 'app\resources\app.asar')) -ne $installation.archiveSha256) { $outcome='unsupported';throw 'Installed app hashes no longer match the verified build' }
-    if (!$NoHook -and (Test-PrismHookOwnership $installation.package $command)) { [PrismPackageSession]::Disable($installation.package) }
+    if (!$NoHook) { [void](Test-PrismHookOwnership $installation.package $command) }
     $algorithm=[Security.Cryptography.SHA256]::Create()
     try { $slot=[BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($package.PackageFullName))).Replace('-','').Substring(0,8) } finally { $algorithm.Dispose() }
     # Keep the versioned alias directly under the installation root: every extra
@@ -40,7 +40,7 @@ try {
     } else { New-Item -ItemType Junction -Path $aliasRoot -Target (Join-Path $package.InstallLocation 'app') | Out-Null }
     Write-PrismJson (Join-Path $state 'callback.json') ([ordered]@{
         package=$installation.package;image=$image;imageAlias=$imageAlias;profile=$TestProfile
-        notBefore=[DateTime]::UtcNow.AddSeconds(-1).ToFileTimeUtc();expires=0;heartbeat=$statusPath;log=(Join-Path $state 'activations.jsonl')
+        notBefore=[DateTime]::UtcNow.AddSeconds(-30).ToFileTimeUtc();expires=0;heartbeat=$statusPath;log=(Join-Path $state 'activations.jsonl')
     })
     $environmentBlock=$null
     if ($TestProfile) {

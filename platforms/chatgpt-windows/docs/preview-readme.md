@@ -28,6 +28,8 @@ Select Prism in the composer's slash menu and send commands such as:
 /prism bg "C:\Wallpapers\video.mp4"
 /prism dim 40%
 /prism fit contain
+/prism theme list
+/prism theme use "Miku"
 /prism theme auto
 /prism theme font rounded
 /prism theme opacity 75%

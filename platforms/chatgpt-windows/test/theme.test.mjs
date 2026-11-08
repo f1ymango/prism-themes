@@ -42,7 +42,7 @@ test('explicit theme choices produce scoped reversible CSS; off restores baselin
   assert.ok(!wallpaperStyle('theme-owner-123', null).includes('font-family:Georgia'));
 });
 
-test('theme commands persist overrides and a new wallpaper resets to auto', async () => {
+test('theme library retains wallpaper combinations and restores named themes across controller runs', async () => {
   const base = resolve('.prism-probe/theme-tests');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'theme-'));
@@ -54,13 +54,35 @@ test('theme commands persist overrides and a new wallpaper resets to auto', asyn
     await mkdir(state);
     await writeFile(join(root, 'installation.json'), JSON.stringify({ product: 'prism-chatgpt', enabled: true }));
     await writeFile(join(state, 'preferences.json'), JSON.stringify({ schema: 1, image: asset, enabled: true, settings: { controls: false } }));
+    await run('bg', asset);
     assert.equal((await run('theme', 'font', 'serif')).theme.font, 'serif');
     assert.equal((await run('theme', 'accent', '#ff7788')).theme.accent, '#ff7788');
     assert.equal((await run('theme', 'opacity', '80%')).theme.opacity, .8);
-    assert.equal((await run('theme', 'off')).theme.mode, 'off');
+    await run('dim', '20%');
+    await run('fit', 'contain');
+    await run('theme', 'save', 'Tea Party');
     await assert.rejects(run('theme', 'tint', 'red'));
-    assert.equal((await run('bg', asset)).theme.mode, 'auto');
+    assert.equal((await run('bg', resolve('assets/prism-plum.png'))).theme.mode, 'auto');
     assert.equal(JSON.parse(await readFile(join(state, 'preferences.json'), 'utf8')).theme.accent, null);
+    assert.equal((await run('theme', 'list')).themes.length, 2);
+    const restored = await run('theme', 'use', 'tea party');
+    assert.equal(restored.theme.accent, '#ff7788');
+    assert.equal(restored.theme.font, 'serif');
+    assert.equal(restored.settings.dim, .2);
+    assert.equal(restored.settings.fit, 'contain');
+    await run('bg', resolve('assets/prism-plum.png'));
+    assert.equal((await run('bg', asset)).theme.accent, '#ff7788');
+    const before = await readFile(join(state, 'preferences.json'), 'utf8');
+    await assert.rejects(run('theme', 'use', 'missing'));
+    assert.equal(await readFile(join(state, 'preferences.json'), 'utf8'), before);
+    await run('theme', 'off');
+    assert.equal((await run('theme', 'use', 'Tea Party')).theme.mode, 'off');
+    await writeFile(join(state, 'themes.json'), 'damaged library');
+    const disabled = await run('off');
+    assert.equal(disabled.enabled, false);
+    assert.ok(disabled.libraryWarning);
+    assert.equal(await readFile(join(state, 'themes.json'), 'utf8'), 'damaged library');
+    await assert.rejects(run('theme', 'list'));
   } finally {
     if (!resolve(root).startsWith(base + sep)) throw new Error('Refusing cleanup outside theme test root');
     await rm(root, { recursive: true });

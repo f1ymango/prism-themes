@@ -1,0 +1,15 @@
+{
+  "result": "passed",
+  "scope": "Owned isolated Windows package activation with an enabled fixture installation, stopped fixture helpers, and a temporarily registered fixture callback. The personal helper was restored and original app processes were preserved.",
+  "checks": {
+    "coldCallbackStartedHelper": true,
+    "firstActivationWallpaperApplied": true,
+    "personalHelperRestored": true,
+    "originalAppProcessesPreserved": true
+  },
+  "helperWaitMs": 1429,
+  "limitations": [
+    "This simulates a cold helper; it is not a PC reboot or sign-out/sign-in acceptance test.",
+    "OS updates clearing package registrations and Windows login ordering remain unverified."
+  ]
+}

@@ -8,6 +8,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
+using System.Threading;
 
 // Called by Windows only for new package activations. Changes initial argument data,
 // then resumes the validated initial thread. Existing processes and package files stay intact.
@@ -66,6 +67,34 @@ internal static class ActivationCallback {
         try { var values=new string[count]; for(int i=0;i<count;i++) values[i]=Marshal.PtrToStringUni(Marshal.ReadIntPtr(pointer,i*IntPtr.Size)); return values; } finally { LocalFree(pointer); }
     }
     static string Value(string[] args,string key) { int i=Array.IndexOf(args,key); if(i<0||i+1>=args.Length) throw new Exception("Missing callback argument "+key); return args[i+1]; }
+    static Dictionary<string,object> ReadJson(string path) {
+        using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))
+        using(var reader=new StreamReader(stream)) return new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(reader.ReadToEnd());
+    }
+    static bool HelperReady(string state,string package) {
+        try {
+            var worker=ReadJson(Path.Combine(state,"worker.json"));
+            if((string)worker["state"]!="armed"||(string)worker["package"]!=package||DateTime.UtcNow-DateTime.Parse((string)worker["at"]).ToUniversalTime()>TimeSpan.FromSeconds(10)) return false;
+            using(var process=Process.GetProcessById(Convert.ToInt32(worker["pid"]))) return process.StartTime.ToUniversalTime().ToString("o")== (string)worker["created"];
+        } catch { return false; }
+    }
+    // A first activation can beat the delayed Windows login startup entry. Wake the
+    // owned supervisor and wait for its build-checked worker before resuming it.
+    internal static Dictionary<string,object> EnsureReady(string configPath,string package,int timeoutMs) {
+        string state=Path.GetDirectoryName(Path.GetFullPath(configPath)),root=Path.GetDirectoryName(state);
+        if(!String.Equals(configPath,Path.Combine(root,"state","callback.json"),StringComparison.OrdinalIgnoreCase)) throw new Exception("Unexpected callback configuration path");
+        var install=ReadJson(Path.Combine(root,"installation.json"));
+        if((string)install["product"]!="prism-chatgpt"||!(bool)install["enabled"]||(string)install["package"]!=package||!String.Equals((string)install["root"],root,StringComparison.OrdinalIgnoreCase)||(string)install["sid"]!=WindowsIdentity.GetCurrent().User.Value||(File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0||File.Exists(Path.Combine(state,"stop"))) throw new Exception("Inactive installation; native activation preserved");
+        if(!HelperReady(state,package)) {
+            Process.Start(new ProcessStartInfo { FileName=Path.Combine(root,"PrismHelper.exe"),UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden });
+            var deadline=DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while(!HelperReady(state,package)) {
+                if(File.Exists(Path.Combine(state,"stop"))||DateTime.UtcNow>=deadline) throw new Exception("Helper readiness timed out; native activation preserved");
+                Thread.Sleep(100);
+            }
+        }
+        return ReadJson(configPath);
+    }
     static string Package(IntPtr process) {
         uint size=0; if(GetPackageFullName(process,ref size,null)!=122||size>1024) throw new Exception("Missing package identity");
         var name=new StringBuilder((int)size); int error=GetPackageFullName(process,ref size,name); if(error!=0) throw new Win32Exception(error); return name.ToString();
@@ -131,11 +160,15 @@ internal static class ActivationCallback {
             thread=OpenThread(0x802,false,tid); if(thread==IntPtr.Zero||GetProcessIdOfThread(thread)!=pid) throw new Exception("Callback thread mismatch");
             long threadCreated; if(!GetThreadTimes(thread,out threadCreated,out exit,out kernel,out user)||threadCreated<created||threadCreated-created>TimeSpan.FromSeconds(2).Ticks) throw new Exception("Not an initial thread");
             resume=true;
-            var config=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Value(args,"--config"))); log=(string)config["log"];
+            string configPath=Path.GetFullPath(Value(args,"--config"));
+            var config=ReadJson(configPath); log=(string)config["log"];
+            if(!String.Equals(image.ToString(),(string)config["image"],StringComparison.OrdinalIgnoreCase)) throw new Exception("Auxiliary process preserved");
+            var readiness=Stopwatch.StartNew();
+            config=EnsureReady(configPath,package,12000);
+            result["helperWaitMs"]=readiness.ElapsedMilliseconds;
+            now=DateTime.UtcNow.ToFileTimeUtc();
             long expires=Convert.ToInt64(config["expires"]);
             if(created>now||now-created>TimeSpan.FromSeconds(30).Ticks||package!=(string)config["package"]||created<Convert.ToInt64(config["notBefore"])||(expires>0&&now>expires)) throw new Exception("Activation scope expired or mismatched");
-            string heartbeat=(string)config["heartbeat"];
-            if(!File.Exists(heartbeat)||DateTime.UtcNow-File.GetLastWriteTimeUtc(heartbeat)>TimeSpan.FromSeconds(20)) throw new Exception("Inactive helper; native activation preserved");
             if(!String.Equals(image.ToString(),(string)config["image"],StringComparison.OrdinalIgnoreCase)) throw new Exception("Auxiliary process preserved");
             AppendDebugArguments(process,(string)config["image"],(string)config["profile"],(string)config["imageAlias"]); result["patched"]=true;
         } catch(Exception error) { result["error"]=error.Message; }

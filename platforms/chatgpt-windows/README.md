@@ -23,6 +23,9 @@ The installer registers the Prism skill. Once it reports ready, fully quit ChatG
 | `/prism dim 40%` | Set dimming |
 | `/prism fit contain` | Fit the whole image |
 | `/prism position top` | Align at the top |
+| `/prism theme list` | List saved wallpaper/theme combinations |
+| `/prism theme use "Miku"` | Restore a saved combination by name or ID |
+| `/prism theme save "Tea Party"` | Name the current combination |
 | `/prism theme auto` | Regenerate a matching theme from the current wallpaper |
 | `/prism theme font rounded` | Choose a local font preset |
 | `/prism theme tint #234052` | Choose the panel tint colour |
@@ -40,7 +43,7 @@ Images are limited to 15 MiB and 40 million pixels. Native video commands suppor
 
 Prism also themes the composer, resource cards, and Outputs/Sources panel with translucent surfaces and removes the default top/bottom scroll-fade backdrops. These styles restore with `off` or removal. See [surface transparency](docs/surface-transparency.md) for scope and verification.
 
-The automatic theme samples a small decoded image or video frame locally. It picks a colour palette and a font from installed system font stacks; it does not infer the subject or mood of the artwork. A custom theme request can refine those choices with the commands above. Selecting another wallpaper resets the theme overrides so the new image gets its own match. The theme is scoped to reviewed app surfaces and is removed with the wallpaper.
+The automatic theme samples a small decoded image or video frame locally. It picks a colour palette and a font from installed system font stacks; it does not infer the subject or mood of the artwork. A custom theme request can refine those choices with the commands above. Prism automatically remembers the combination for each wallpaper and restores it when selected again. Use the named commands above to switch directly; see the [theme library](docs/theme-library.md). The theme is scoped to reviewed app surfaces and is removed with the wallpaper.
 
 `Install.ps1` and `Uninstall.ps1` provide setup/removal entry points. A local source preview can be built with `scripts/package-preview.ps1`; it excludes user state, media, screenshots, logs, and runtime/app binaries and includes a source hash manifest. See the [portable preview instructions](docs/preview-readme.md). This source is covered by the repository's MIT license; a standalone release has not been published.
 
@@ -126,7 +129,7 @@ The older launcher keeps a loopback-only Chrome DevTools Protocol listener open 
 
 ## Validation and limits
 
-The declared automated suite passes 42 tests:
+The declared automated suite passes 43 tests on Windows:
 
 ```powershell
 node --test (Get-ChildItem -LiteralPath test -Filter '*.test.mjs').FullName
