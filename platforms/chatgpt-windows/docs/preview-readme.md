@@ -1,6 +1,6 @@
 # Prism desktop wallpaper - source preview
 
-Unofficial local wallpaper customization for the Windows ChatGPT/Codex desktop app. The currently verified view is Codex in Windows package `OpenAI.Codex`. This is a local engineering preview; publication and licensing decisions are pending.
+Unofficial local wallpaper customization for the Windows ChatGPT/Codex desktop app. The currently verified view is Codex in Windows package `OpenAI.Codex`. This engineering preview is included in the MIT-licensed Prism repository; a standalone release has not been published.
 
 ## Requirements
 

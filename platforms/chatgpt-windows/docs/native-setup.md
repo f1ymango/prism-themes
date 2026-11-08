@@ -4,9 +4,9 @@ The Prism skill has working setup, status, image, dimming, fit, position, on/off
 
 ## User workflow
 
-1. Select Prism in the slash menu and send `setup`.
+1. For the first install, open PowerShell in `platforms/chatgpt-windows` and run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1`. This registers the Prism skill. Later, `setup` in the slash menu can re-enable it.
 2. When the worker reports ready, fully quit ChatGPT, including any tray process, then reopen it through its usual icon.
-3. Use `bg <absolute local file>` to choose an image, or use the image already saved by setup. Use `status` to verify that `appliedWindows` is positive.
+3. Select Prism in the slash menu. Use `bg <absolute local file>` to choose an image, or use the image already saved by setup. Use `status` to verify that `appliedWindows` is positive.
 
 Setup copies a standalone Node runtime and the helper into `%LOCALAPPDATA%\PrismChatGPT`. It registers one current-user login entry, `PrismChatGPTWallpaper`, pointing to the short `PrismHelper.exe` command. That hidden supervisor starts and monitors the worker. Existing Prism image preferences are used when available; otherwise setup starts with the supplied test image. New image choices are byte-validated and copied into local content-addressed files, so ordinary use does not depend on the original image path or development checkout remaining available.
 

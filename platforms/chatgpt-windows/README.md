@@ -1,16 +1,22 @@
 # Prism for the ChatGPT desktop app
 
-A Windows image and video wallpaper integration controlled through the ChatGPT composer's Prism skill. Setup installs a user-scoped background helper; after one full app restart, ordinary Windows activation prepares the app for live wallpaper commands.
+A Windows image and video wallpaper integration controlled through the ChatGPT composer's Prism skill. The first install registers that skill and a user-scoped background helper; after one full app restart, ordinary Windows activation prepares the app for live wallpaper commands.
 
 Verified on Windows package OpenAI.Codex 26.1103.4239.0, embedded app 26.1103.32239. After app updates, `/prism repair` tests an unfamiliar build in an isolated profile before approving its fingerprint. MP4/WebM playback and cleanup passed in an owned visible app window. Actual Windows login, hours-long sessions, detached windows, Chat/Work views, a future app release, and gaming performance remain unverified. See the [current roadmap](docs/roadmap.md), [update compatibility](docs/update-compatibility.md), and [video milestone](docs/video-wallpaper.md).
 
-## Native composer commands
+## First install and native composer commands
 
-Select Prism from the composer's slash list and add `setup`. Once setup reports ready, fully quit ChatGPT and reopen it from its usual icon. Subsequent wallpaper changes apply live in prepared windows. These commands run through an agent turn.
+Install Node.js 22 or later, open PowerShell in this folder, and run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+The installer registers the Prism skill. Once it reports ready, fully quit ChatGPT, including its tray process, and reopen it from its usual icon. Then select Prism from the composer's slash list. Subsequent wallpaper changes apply live in prepared windows. These commands run through an agent turn.
 
 | Command | Action |
 | --- | --- |
-| `/prism setup` | Install or re-enable the integration; repeated setup reuses a healthy worker |
+| `/prism setup` | Re-enable an installed integration; repeated setup reuses a healthy worker |
 | `/prism bg C:\Wallpapers\image.png` | Validate, save locally, and apply an image |
 | `/prism bg C:\Wallpapers\video.mp4` | Apply a muted looping MP4 or WebM video |
 | `/prism repair` | Refresh Prism and check the installed app build after an update |
@@ -27,7 +33,7 @@ Images are limited to 15 MiB and 40 million pixels. Native video commands suppor
 
 Prism also themes the composer, resource cards, and Outputs/Sources panel with translucent surfaces and removes the default top/bottom scroll-fade backdrops. These styles restore with `off` or removal. See [surface transparency](docs/surface-transparency.md) for scope and verification.
 
-`Install.ps1` and `Uninstall.ps1` provide one-time setup/removal entry points. A local source preview can be built with `scripts/package-preview.ps1`; it excludes user state, media, screenshots, logs, and runtime/app binaries and includes a source hash manifest. See the [portable preview instructions](docs/preview-readme.md). Publication and licensing decisions remain pending.
+`Install.ps1` and `Uninstall.ps1` provide setup/removal entry points. A local source preview can be built with `scripts/package-preview.ps1`; it excludes user state, media, screenshots, logs, and runtime/app binaries and includes a source hash manifest. See the [portable preview instructions](docs/preview-readme.md). This source is covered by the repository's MIT license; a standalone release has not been published.
 
 ## Earlier separate-window prototype
 
@@ -111,10 +117,10 @@ The older launcher keeps a loopback-only Chrome DevTools Protocol listener open 
 
 ## Validation and limits
 
-The automated suite passes 30 tests:
+The declared automated suite passes 38 tests:
 
 ```powershell
-node --test test/asar.test.mjs test/cdp.test.mjs test/marker.test.mjs test/compatibility.test.mjs test/media.test.mjs test/settings.test.mjs test/wallpaper.test.mjs test/preferences.test.mjs test/prism-command.test.mjs test/browser-image-info.test.mjs test/native-status.test.mjs test/preferences-sharing.test.mjs
+node --test (Get-ChildItem -LiteralPath test -Filter '*.test.mjs').FullName
 ```
 
 Live checks covered registered Windows activation and package identity; the signed-in composer; wallpaper behind the main surface and sidebar; saved control changes; reuse of the persistent UI profile; and explicit stop with listener cleanup. Installed-file hashes stayed unchanged and the original app process remained alive.
@@ -123,6 +129,6 @@ The isolated wallpaper proof also verified PNG/JPEG/WebP decoding, image switchi
 
 The in-app control proof also passed file selection through Prism's own HTML input, invalid-file recovery, commands, keyboard toggling, local image/settings restoration after reinjection, and keyboard-handler removal. The file input was populated through CDP; the OS file-dialog interaction itself was not automated.
 
-An already-open signed-in Prism window was updated without restarting it; its image, settings, process, and installed-file hashes were preserved. Message sending, tools, long sessions, Chat/Work views, and full update compatibility have not been tested. Video support remains to be implemented.
+An already-open signed-in Prism window was updated without restarting it; its image, settings, process, and installed-file hashes were preserved. The native integration has also passed an owned visible-window MP4/WebM playback and cleanup check. Actual Windows login, long sessions, detached windows, Chat/Work views, and future app releases remain unverified.
 
 See [in-app controls](docs/in-app-controls.md), [the launcher milestone](docs/milestone-2.md), and the [original loading experiment](docs/phase-1-findings.md). The original Claude Prism project is [f1ymango/prism-themes](https://github.com/f1ymango/prism-themes).
