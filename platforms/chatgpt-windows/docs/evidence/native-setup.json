@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-08",
+  "package": "OpenAI.Codex_26.1103.4239.0_x64__2p2nqsd0c76g0",
+  "result": "passed",
+  "scope": "Isolated installation and app profile; no personal login entry or skill modified by the lifecycle fixture",
+  "lifecycleChecks": {
+    "fixtureSetup": true,
+    "fullSession": true,
+    "repeatedSetupIsIdempotent": true,
+    "removalRestoresAppearance": true,
+    "removalPreservesApp": true,
+    "callbackRemoved": true,
+    "savedSession": true,
+    "originalProcessesPreserved": true,
+    "loginStartupUnchanged": true
+  },
+  "liveChecks": {
+    "automaticApplication": true,
+    "liveImageCommand": true,
+    "invalidImagePreservesWallpaper": true,
+    "liveDimmingCommand": true,
+    "restoreCommand": true,
+    "enableCommand": true
+  },
+  "reinstallChecks": {
+    "automaticApplication": true,
+    "savedImageAfterReinstall": true
+  },
+  "unverified": [
+    "Actual Windows sign-out/sign-in",
+    "Hours-long sessions",
+    "Detached windows and Chat/Work views",
+    "Future app updates",
+    "Automatic supervisor self-restart"
+  ],
+  "userAcceptance": {
+    "date": "2026-11-08",
+    "basis": "Real setup/status calls and user-provided screenshot in this chat",
+    "persistentSetupCompleted": true,
+    "workerRunning": true,
+    "hostRunning": true,
+    "appliedWindowsReported": 2,
+    "restartRequired": false,
+    "helperErrorsReported": [],
+    "signedInCodexConversationWallpaperVisible": true
+  },
+  "reliabilityEvidence": "docs/evidence/reliability.json"
+}

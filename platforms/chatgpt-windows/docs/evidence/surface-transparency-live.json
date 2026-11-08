@@ -1,0 +1,65 @@
+{
+  "topFades": [
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "alpha": 0,
+      "image": "none"
+    }
+  ],
+  "bottomFades": [
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "alpha": 0,
+      "image": "none"
+    }
+  ],
+  "footerBackdrops": [
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "alpha": 0,
+      "image": "none"
+    }
+  ],
+  "panels": [
+    {
+      "background": "color(srgb 0.0941176 0.0941176 0.0941176 / 0.65)",
+      "alpha": 0.6509803921568628,
+      "image": "none"
+    }
+  ],
+  "panelHeaders": [
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "alpha": 0,
+      "image": "none",
+      "beforeAlpha": 0
+    },
+    {
+      "background": "rgba(0, 0, 0, 0)",
+      "alpha": 0,
+      "image": "none",
+      "beforeAlpha": 0
+    }
+  ],
+  "composers": [
+    {
+      "background": "rgba(24, 24, 24, 0.65)",
+      "alpha": 0.6509803921568628,
+      "image": "none"
+    }
+  ],
+  "cards": [
+    {
+      "background": "color(srgb 0.0941176 0.0941176 0.0941176 / 0.65)",
+      "alpha": 0.6509803921568628,
+      "image": "none"
+    }
+  ],
+  "video": {
+    "kind": "VIDEO",
+    "paused": false,
+    "muted": true,
+    "currentTime": 11.6455,
+    "sha256": "996a845ed7902f5cf4cfd37d20f39e7f68e3f8b2797a4e7861591f7a9603e6a4"
+  }
+}

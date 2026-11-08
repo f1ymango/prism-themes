@@ -1,0 +1,12 @@
+{
+  "result": "passed",
+  "checks": {
+    "staleActivationRecordIgnored": true,
+    "listenerClosed": true,
+    "originalAppProcessesPreserved": true
+  },
+  "observations": {
+    "recorderTypes": []
+  },
+  "error": null
+}

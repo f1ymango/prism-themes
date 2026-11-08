@@ -1,0 +1,16 @@
+{
+  "name": "prism-chatgpt",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Local image and video wallpaper for the Windows ChatGPT desktop app.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "inspect": "node scripts/inspect-app.mjs",
+    "probe": "node scripts/probe-app.mjs",
+    "wallpaper": "node scripts/wallpaper-app.mjs",
+    "start": "node scripts/start-prism.mjs",
+    "shortcuts": "node scripts/create-shortcuts.mjs",
+    "test": "node --test test/asar.test.mjs test/cdp.test.mjs test/marker.test.mjs test/compatibility.test.mjs test/media.test.mjs test/media-transfer.test.mjs test/settings.test.mjs test/wallpaper.test.mjs test/preferences.test.mjs test/prism-command.test.mjs test/browser-image-info.test.mjs test/native-status.test.mjs test/preferences-sharing.test.mjs test/build-approval.test.mjs"
+  }
+}

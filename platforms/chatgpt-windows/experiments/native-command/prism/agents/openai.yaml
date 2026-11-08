@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prism"
+  short_description: "Diagnose desktop wallpaper command routing"
+  default_prompt: "Use $prism to check the desktop command route."

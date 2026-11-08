@@ -1,0 +1,22 @@
+{
+  "result": "passed",
+  "checks": {
+    "webmPlayback": true,
+    "mp4Playback": true,
+    "settingsPreserveDecoder": true,
+    "reducedMotionPauseResume": true,
+    "visibilityPolicyPauseResume": true,
+    "failedReplacementRetainsPreviousVideo": true,
+    "staticSwitchReleasesVideoAndUrl": true,
+    "offReleasesVideo": true,
+    "listenerClosed": true,
+    "originalAppProcessesPreserved": true
+  },
+  "observations": {
+    "recorderTypes": [
+      "video/webm;codecs=vp8",
+      "video/mp4"
+    ]
+  },
+  "error": null
+}

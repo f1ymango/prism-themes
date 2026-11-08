@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
+import { runExperiment } from '../src/experiment.mjs';
+import { registeredLauncher } from '../src/windows.mjs';
+import { loadLocalImage } from '../src/media.mjs';
+import { wallpaperExpression } from '../src/wallpaper.mjs';
+
+const report = await runExperiment({ name: 'in-app-controls', launchExecutable: await registeredLauncher(), useExistingBackend: true, async main(context) {
+  const image = await loadLocalImage('assets/prism-night.png');
+  const alternate = await loadLocalImage('assets/prism-plum.png');
+  const call = (action, extra = {}) => context.evaluate(wallpaperExpression(action, { runId: context.runId, ...extra }));
+  context.onCleanup(() => call('remove'));
+  const applied = await call('apply', { image, settings: {}, mode: 'session', panelOpen: true });
+  assert.equal(applied.panelOpen, true);
+  const command = text => context.evaluate(`(() => {const input=document.getElementById('prism-wallpaper-controls-v1').shadowRoot.querySelector('[name=prism-command]');input.value=${JSON.stringify(text)};input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));})()`);
+  await command('/prism dim 61');
+  assert.equal((await call('status')).settings.dim, .61);
+  await command('fit contain');
+  assert.equal((await call('status')).settings.fit, 'contain');
+  await command('hide');
+  assert.equal((await call('status')).panelOpen, false);
+  await context.evaluate("dispatchEvent(new KeyboardEvent('keydown',{key:'p',ctrlKey:true,altKey:true,cancelable:true}))");
+  assert.equal((await call('status')).panelOpen, true);
+  context.report.checks.inAppCommandsAndShortcut = true;
+  const fileInput = await context.client.send('Runtime.evaluate', {
+    expression: "document.getElementById('prism-wallpaper-controls-v1').shadowRoot.querySelector('[name=wallpaper-file]')", contextId: context.contextId,
+  }, { sessionId: context.sessionId });
+  await context.client.send('DOM.setFileInputFiles', { objectId: fileInput.result.objectId, files: [resolve('assets/prism-plum.png')] }, { sessionId: context.sessionId });
+  let state;
+  const deadline = Date.now() + 8000;
+  do { await context.pause(200); state = await call('status'); } while ((state.pickerBusy || state.image?.sha256 !== alternate.sha256) && Date.now() < deadline);
+  assert.equal(state.image.sha256, alternate.sha256);
+  assert.equal(state.pickerBusy, false);
+  context.report.checks.inAppFileSelection = true;
+  await context.screenshot('in-app-picker.png');
+  await context.client.send('DOM.setFileInputFiles', { objectId: fileInput.result.objectId, files: [resolve('package.json')] }, { sessionId: context.sessionId });
+  await context.pause(500);
+  assert.equal((await call('status')).image.sha256, alternate.sha256);
+  context.report.checks.badFilePreservesWallpaper = true;
+  await call('remove');
+  const restored = await call('apply', { image, settings: {}, mode: 'session', restoreSaved: true, panelOpen: true });
+  assert.equal(restored.image.sha256, alternate.sha256);
+  assert.equal(restored.settings.dim, .61);
+  assert.equal(restored.settings.fit, 'contain');
+  context.report.checks.inAppSelectionAndSettingsRestored = true;
+  await call('remove');
+  const prevented = await context.evaluate("(() => {const event=new KeyboardEvent('keydown',{key:'p',ctrlKey:true,altKey:true,cancelable:true});dispatchEvent(event);return event.defaultPrevented;})()");
+  assert.equal(prevented, false);
+  context.report.checks.keyboardHandlerRemoved = true;
+} });
+if (report.result !== 'passed') process.exitCode = 1;

@@ -1,0 +1,13 @@
+{
+  "result": "passed",
+  "checks": {
+    "decorativeFadesRemoved": true,
+    "panelsComposerCardsTranslucent": true,
+    "controlsCodeAndDialogsPreserved": true,
+    "layoutAndPointerBehaviorPreserved": true,
+    "nativeStylesRestored": true,
+    "listenerClosed": true,
+    "originalAppProcessesPreserved": true
+  },
+  "error": null
+}

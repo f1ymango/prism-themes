@@ -1,0 +1,47 @@
+{
+  "result": "passed",
+  "checks": {
+    "webmPlayback": true,
+    "mp4Playback": true,
+    "largeVideoPlayback": true,
+    "settingsPreserveDecoder": true,
+    "repeatedSelectionPreservesDecoder": true,
+    "loopWraps": true,
+    "reducedMotionPauseResume": true,
+    "visibilityPolicyPauseResume": true,
+    "failedReplacementRetainsPreviousVideo": true,
+    "staticSwitchReleasesVideoAndUrl": true,
+    "offReleasesVideo": true,
+    "offCancelsLargeTransfer": true,
+    "listenerClosed": true,
+    "originalAppProcessesPreserved": true
+  },
+  "observations": {
+    "recorderTypes": [
+      "video/webm;codecs=vp8",
+      "video/mp4"
+    ],
+    "largeVideoTransfers": [
+      {
+        "bytes": 41949889,
+        "elapsedMs": 5222,
+        "width": 320,
+        "height": 180
+      },
+      {
+        "bytes": 134217728,
+        "elapsedMs": 11567,
+        "width": 320,
+        "height": 180
+      },
+      {
+        "bytes": 41005617,
+        "elapsedMs": 4831,
+        "width": 1920,
+        "height": 1080
+      }
+    ],
+    "cancelMs": 109
+  },
+  "error": null
+}

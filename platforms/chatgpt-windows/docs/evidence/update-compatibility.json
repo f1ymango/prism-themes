@@ -1,0 +1,18 @@
+{
+  "package": "OpenAI.Codex_26.1103.4239.0_x64__2p2nqsd0c76g0",
+  "image": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1103.4239.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+  "executableSha256": "5586707af6624c04959ba2c5b4ad6d216a1d8ed17c04937a757495649de44b92",
+  "archiveSha256": "fb47d6491dc3006b708cb1e14de479b882bf50f88b7daa81818f154c253266aa",
+  "contract": 1,
+  "checkedAt": "2026-11-08T03:56:57.625Z",
+  "checks": {
+    "imageVisible": true,
+    "settingsChanged": true,
+    "restored": true,
+    "installedFilesUnchanged": true,
+    "listenerClosed": true
+  },
+  "passed": true,
+  "error": null,
+  "embeddedVersion": "26.1103.32239"
+}

@@ -1,0 +1,8 @@
+.prism-probe/
+node_modules/
+.prism-user/
+.prism-release/
+*.lnk
+
+# Public milestone documentation for the Windows implementation.
+!docs/roadmap.md

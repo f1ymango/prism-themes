@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-08",
+  "automatedTestsPassed": 30,
+  "scope": "Owned isolated CDP processes; fixture discovery records are seeded after PID, package, and listener verification. The personal callback remains active and unchanged.",
+  "result": "passed",
+  "recoveryChecks": {
+    "shortLoginCommand": true,
+    "multipleTargetsUpdated": true,
+    "stalledTargetDoesNotExpireHealthyWallpaper": true,
+    "rendererHostCrashRecovery": true,
+    "rendererReloadRecovery": true,
+    "workerCrashRecovery": true,
+    "startupCommandAdoptsExistingWorker": true,
+    "duplicateStartupIsIdempotent": true,
+    "repeatedColdSessionRetainsImage": true,
+    "unsupportedBuildPausesWithoutRestartLoop": true,
+    "repairReattachesExistingApp": true,
+    "removalRestoresRemainingTargets": true,
+    "testListenerClosed": true,
+    "originalAppProcessesPreserved": true,
+    "personalRegistrationsUnchanged": true,
+    "appOwnedNewWindowCreated": true
+  },
+  "visibleWindows": {
+    "result": "passed",
+    "checks": {
+      "shortLoginCommand": true,
+      "appOwnedNewWindowCreated": true,
+      "twoVisibleNativeWindows": true,
+      "multipleTargetsUpdated": true,
+      "removalRestoresRemainingTargets": true,
+      "testListenerClosed": true,
+      "originalAppProcessesPreserved": true,
+      "personalRegistrationsUnchanged": true
+    },
+    "counts": {
+      "before": 0,
+      "after": 2
+    }
+  },
+  "installedUpgrade": {
+    "result": "passed",
+    "checks": {
+      "implementationVersion2": true,
+      "shortStartupEntry": true,
+      "ownedCallbackReady": true,
+      "preferencesUnchanged": true,
+      "originalAppProcessesPreserved": true,
+      "liveWallpaperReattached": true,
+      "supervisorHealthy": true,
+      "helperErrorsAbsent": true
+    },
+    "startupCommandCharacters": 58,
+    "appliedWindows": 2
+  },
+  "remaining": [
+    "Actual Windows login or reboot scheduling",
+    "Hours-long sessions",
+    "Detached windows and Chat/Work views",
+    "Future app releases",
+    "Automatic supervisor self-restart"
+  ]
+}

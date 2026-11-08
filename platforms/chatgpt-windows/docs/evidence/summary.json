@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "dateHongKong": "2026-11-07",
+  "scope": "Installed production executable, isolated signed-out profile; Windows packaged activation and authenticated conversations are unverified.",
+  "windowsPackageVersion": "26.1103.4239.0",
+  "embeddedApp": {
+    "name": "openai-codex-electron",
+    "version": "26.1103.32239",
+    "main": ".vite/build/early-bootstrap.js",
+    "buildFlavor": "prod",
+    "packageIdentity": "OpenAI.Codex"
+  },
+  "fingerprint": {
+    "executableSha256": "5586707af6624c04959ba2c5b4ad6d216a1d8ed17c04937a757495649de44b92",
+    "archiveSha256": "fb47d6491dc3006b708cb1e14de479b882bf50f88b7daa81818f154c253266aa"
+  },
+  "automatedTests": {
+    "command": "node --test test/asar.test.mjs test/cdp.test.mjs test/marker.test.mjs test/compatibility.test.mjs",
+    "passed": 11,
+    "failed": 0
+  },
+  "runs": [
+    {
+      "artifactDirectory": ".prism-probe/run-2026-11-07T14-06-46-972Z-c8921bb8",
+      "startedAt": "2026-11-07T14:06:46.973Z",
+      "finishedAt": "2026-11-07T14:06:58.047Z",
+      "result": "marker-apply-remove-passed",
+      "renderer": "app://-/index.html",
+      "visibleControlsBefore": 4,
+      "visibleControlsAfter": 4,
+      "loopbackListenerOwnedByTestProcess": true,
+      "markerApplied": true,
+      "markerVisible": true,
+      "pointerEvents": "none",
+      "ariaHidden": "true",
+      "countAfterRepeatedApply": 1,
+      "foreignOwnerRejected": true,
+      "countAfterRemove": 0,
+      "countAfterExpiry": 0,
+      "expiryObservedAfterMs": 414,
+      "processCleanup": "stopped-owned-instance",
+      "debugPortClosed": true,
+      "packageUnchanged": true,
+      "originalAppRootsStillRunning": true
+    },
+    {
+      "artifactDirectory": ".prism-probe/run-2026-11-07T14-07-56-552Z-de687b8a",
+      "startedAt": "2026-11-07T14:07:56.553Z",
+      "finishedAt": "2026-11-07T14:08:07.145Z",
+      "result": "marker-apply-remove-passed",
+      "renderer": "app://-/index.html",
+      "visibleControlsBefore": 4,
+      "visibleControlsAfter": 4,
+      "loopbackListenerOwnedByTestProcess": true,
+      "markerApplied": true,
+      "markerVisible": true,
+      "pointerEvents": "none",
+      "ariaHidden": "true",
+      "countAfterRepeatedApply": 1,
+      "foreignOwnerRejected": true,
+      "countAfterRemove": 0,
+      "countAfterExpiry": 0,
+      "expiryObservedAfterMs": 414,
+      "processCleanup": "stopped-owned-instance",
+      "debugPortClosed": true,
+      "packageUnchanged": true,
+      "originalAppRootsStillRunning": true
+    }
+  ],
+  "screenshots": {
+    "visible": "marker-visible.png",
+    "removed": "marker-removed.png"
+  },
+  "notVerified": [
+    "authenticated conversation functionality",
+    "Windows packaged activation and identity-dependent integration",
+    "persistent loading",
+    "wallpapers and video playback",
+    "other application versions or platforms"
+  ]
+}

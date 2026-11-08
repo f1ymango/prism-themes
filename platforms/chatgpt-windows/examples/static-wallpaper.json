@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "image": "../assets/prism-night.png",
+  "settings": {
+    "dim": 0.35,
+    "fit": "cover",
+    "position": "center",
+    "controls": true
+  }
+}

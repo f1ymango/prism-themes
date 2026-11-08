@@ -1,0 +1,12 @@
+{
+    "result":  "passed",
+    "checks":  {
+                   "archiveManifestVerified":  true,
+                   "extractedSourceTests":  true,
+                   "nonAsciiInstallation":  true,
+                   "idempotentSetup":  true,
+                   "isolatedRemoval":  true,
+                   "personalRegistrationsPreserved":  true
+               },
+    "error":  null
+}

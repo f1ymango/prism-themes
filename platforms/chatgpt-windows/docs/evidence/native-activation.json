@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-08",
+  "windowsPackage": "OpenAI.Codex_26.1103.4239.0_x64__2p2nqsd0c76g0",
+  "embeddedAppVersion": "26.1103.32239",
+  "result": "passed",
+  "scope": "Temporary package callback and fresh isolated app profile; persistent normal-profile integration is not installed.",
+  "activation": "IApplicationActivationManager::ActivateApplication / Windows.Launch",
+  "checks": {
+    "launchRequestHadNoDebuggingFlags": true,
+    "temporaryRegistrationRemoved": true,
+    "loopbackEndpointOwnedByTestChild": true,
+    "localImageVisible": true,
+    "liveImageSwitch": true,
+    "liveDimmingChange": true,
+    "appearanceRestored": true,
+    "originalAppProcessesPreserved": true,
+    "installedFilesUnchanged": true,
+    "testListenerClosed": true
+  },
+  "unverified": [
+    "Persistent setup, login startup and recovery",
+    "Signed-in normal profile and ordinary icon cold start",
+    "Multiple windows and app updates",
+    "Persistent integration removal"
+  ]
+}

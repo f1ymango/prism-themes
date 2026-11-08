@@ -1,0 +1,10 @@
+{
+  "version": "0.4.0",
+  "archive": "prism-desktop-0.4.0-0344ce9f-source-preview.zip",
+  "sha256": "fc257b42e0ba40aadbd73123e0941826b76fe89870b9bc0b92daa32ea57c9232",
+  "sourceFiles": 75,
+  "unitTests": 38,
+  "extractedInstallation": "passed",
+  "publication": "pending",
+  "licensing": "pending"
+}
