@@ -1,6 +1,6 @@
 # Prism for the ChatGPT desktop app
 
-A Windows image and video wallpaper integration controlled through the ChatGPT composer's Prism skill. The first install registers that skill and a user-scoped background helper; after one full app restart, ordinary Windows activation prepares the app for live wallpaper commands.
+A Windows image and video wallpaper integration controlled through the ChatGPT composer's Prism skill. Each new wallpaper also gets a matching local theme: a sampled accent, readable translucent panel tint, font preset, and rounded panel shape. The first install registers the skill and a user-scoped background helper; after one full app restart, ordinary Windows activation prepares the app for live commands.
 
 Verified on Windows package OpenAI.Codex 26.1103.4239.0, embedded app 26.1103.32239. After app updates, `/prism repair` tests an unfamiliar build in an isolated profile before approving its fingerprint. MP4/WebM playback and cleanup passed in an owned visible app window. Actual Windows login, hours-long sessions, detached windows, Chat/Work views, a future app release, and gaming performance remain unverified. See the [current roadmap](docs/roadmap.md), [update compatibility](docs/update-compatibility.md), and [video milestone](docs/video-wallpaper.md).
 
@@ -23,6 +23,13 @@ The installer registers the Prism skill. Once it reports ready, fully quit ChatG
 | `/prism dim 40%` | Set dimming |
 | `/prism fit contain` | Fit the whole image |
 | `/prism position top` | Align at the top |
+| `/prism theme auto` | Regenerate a matching theme from the current wallpaper |
+| `/prism theme font rounded` | Choose a local font preset |
+| `/prism theme tint #234052` | Choose the panel tint colour |
+| `/prism theme accent #76d9e1` | Choose the accent colour |
+| `/prism theme opacity 75%` | Set panel tint strength (45–90%) |
+| `/prism theme radius 16` | Set panel corner radius (0–28 px) |
+| `/prism theme off` | Keep the wallpaper with the app's normal font and neutral panels |
 | `/prism off` / `/prism on` | Restore appearance or re-enable the saved image |
 | `/prism status` | Report helper state, prepared windows, and restart requirements |
 | `/prism remove` | Disable the callback and login startup; restore attached windows |
@@ -32,6 +39,8 @@ Removal retains local wallpaper files and the skill for reinstall. Fully restart
 Images are limited to 15 MiB and 40 million pixels. Native video commands support up to 128 MiB and 8,294,400 pixels (3840×2160), transferred in bounded chunks. `updatingWindows` reports active transfers, and `off` can cancel them. Video pauses for hidden documents and reduced-motion preferences; a new video selected while hidden loads when the window becomes visible. Codec support depends on the installed app. The older separate-window prototype below retains its image-only picker. See [large-media results](docs/large-media.md).
 
 Prism also themes the composer, resource cards, and Outputs/Sources panel with translucent surfaces and removes the default top/bottom scroll-fade backdrops. These styles restore with `off` or removal. See [surface transparency](docs/surface-transparency.md) for scope and verification.
+
+The automatic theme samples a small decoded image or video frame locally. It picks a colour palette and a font from installed system font stacks; it does not infer the subject or mood of the artwork. A custom theme request can refine those choices with the commands above. Selecting another wallpaper resets the theme overrides so the new image gets its own match. The theme is scoped to reviewed app surfaces and is removed with the wallpaper.
 
 `Install.ps1` and `Uninstall.ps1` provide setup/removal entry points. A local source preview can be built with `scripts/package-preview.ps1`; it excludes user state, media, screenshots, logs, and runtime/app binaries and includes a source hash manifest. See the [portable preview instructions](docs/preview-readme.md). This source is covered by the repository's MIT license; a standalone release has not been published.
 
@@ -117,7 +126,7 @@ The older launcher keeps a loopback-only Chrome DevTools Protocol listener open 
 
 ## Validation and limits
 
-The declared automated suite passes 38 tests:
+The declared automated suite passes 42 tests:
 
 ```powershell
 node --test (Get-ChildItem -LiteralPath test -Filter '*.test.mjs').FullName

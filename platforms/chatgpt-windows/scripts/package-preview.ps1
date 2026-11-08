@@ -31,7 +31,7 @@ foreach($file in (Get-ChildItem -LiteralPath $stage -File -Recurse)){
  }
  $manifest+=,[ordered]@{path=$file.FullName.Substring($stage.Length+1).Replace('\','/');bytes=$file.Length;sha256=(Get-PrismFileHash $file.FullName)}
 }
-Write-PrismJson (Join-Path $stage 'source-manifest.json') ([ordered]@{product='prism-chatgpt';version=$version;status='local engineering preview; publication and licensing pending';files=$manifest})
+Write-PrismJson (Join-Path $stage 'source-manifest.json') ([ordered]@{product='prism-chatgpt';version=$version;status='MIT-licensed engineering preview; standalone release not published';files=$manifest})
 $archive=Join-Path $OutputDirectory ($name+'.zip')
 Compress-Archive -LiteralPath $stage -DestinationPath $archive -CompressionLevel Optimal
 [ordered]@{archive=$archive;sha256=(Get-PrismFileHash $archive);source=$stage;files=$manifest.Count}|ConvertTo-Json -Compress

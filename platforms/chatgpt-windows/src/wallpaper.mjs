@@ -2,11 +2,12 @@ import { normalizeSettings } from './settings.mjs';
 import { parsePrismCommand } from './prism-command.mjs';
 import { browserImageInfo } from './browser-image-info.mjs';
 import { wallpaperStyle } from './wallpaper-style.mjs';
+import { normalizeTheme, deriveTheme } from './theme.mjs';
 
 // Serialized into the app's isolated world. Shared DOM changes are restricted to owned
 // elements/attributes and reviewed surfaces under #root. Shared styles are removed
 // with the owned stylesheet, restoring native backgrounds without inline edits.
-export async function wallpaperRuntime(action, options, validateSettings, parseCommand, inspectImage, makeStyle) {
+export async function wallpaperRuntime(action, options, validateSettings, parseCommand, inspectImage, makeStyle, validateTheme, derive) {
   const key = '__prismWallpaperV1', loadingKey = '__prismWallpaperLoadingV1', transferKey = '__prismWallpaperTransferV1';
   const layerId = 'prism-wallpaper-v1', styleId = 'prism-wallpaper-style-v1', controlsId = 'prism-wallpaper-controls-v1';
   const attribute = 'data-prism-wallpaper', surfaceAttribute = 'data-prism-wallpaper-surface';
@@ -30,6 +31,8 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     activeObjectUrls: state?.objectUrl ? 1 : 0,
     transferBytes: globalThis[transferKey]?.received ?? 0,
     settings: state ? { ...state.settings } : null,
+    theme: state?.theme ?? null,
+    effectiveTheme: state?.effectiveTheme ?? null,
     image: state ? { name: state.image.name, mime: state.image.mime, kind: state.img.tagName === 'VIDEO' ? 'video' : 'image', width: state.img.videoWidth || state.img.naturalWidth, height: state.img.videoHeight || state.img.naturalHeight, sha256: state.image.sha256 } : null,
     playback: state?.img.tagName === 'VIDEO' ? { paused: state.img.paused, currentTime: state.img.currentTime, muted: state.img.muted, loop: state.img.loop, pauseReason: state.pauseReason ?? null } : null,
     pointerEvents: state ? getComputedStyle(state.layer).pointerEvents : null,
@@ -89,6 +92,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     if (!state) return;
     clearTimeout(state.timer); clearTimeout(state.refreshTimer);
     state.observer?.disconnect();
+    state.themeObserver?.disconnect();
     removeEventListener('resize', state.onResize);
     if (state.onKeyDown) removeEventListener('keydown', state.onKeyDown, true);
     state.removalObserver?.disconnect();
@@ -107,7 +111,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
   if (action === 'status') return status(current);
   if (action === 'remove') { dispose(current); return status(null); }
   if (current && ['apply','update','renew'].includes(action)) {
-    const css = makeStyle(runId);
+    const css = makeStyle(runId, current.effectiveTheme);
     if (current.style.textContent !== css) current.style.textContent = css;
   }
   if (action === 'renew') {
@@ -116,6 +120,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
   }
   if (action === 'update' && !current) throw new Error('Apply an image before updating its settings.');
   let settings = validateSettings(action === 'update' ? { ...current.settings, ...options.settings } : options.settings);
+  const theme = validateTheme(options.theme ?? current?.theme ?? {});
   const storage = async (method, value) => {
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open('prism-wallpaper-v1', 1);
@@ -135,6 +140,21 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
         transaction.onabort = () => reject(transaction.error ?? new Error('Saving was cancelled.'));
       });
     } finally { database.close(); }
+  };
+
+  const refreshStyle = state => {
+    state.effectiveTheme = derive(state.pixels, state.theme, state.shade === '#f8f8f8');
+    const css = makeStyle(runId, state.effectiveTheme);
+    if (state.style.textContent !== css) state.style.textContent = css;
+  };
+
+  const samplePixels = media => {
+    try {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 48;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(media, 0, 0, 48, 48);
+      return context.getImageData(0, 0, 48, 48).data;
+    } catch { return new Uint8Array(0); }
   };
 
   const refreshSurfaces = state => {
@@ -158,6 +178,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     state.shade = foreground?.length === 3 && foreground.reduce((a, b) => a + b, 0) < 384 ? '#f8f8f8' : '#181818';
     state.layer.style.backgroundColor = state.shade;
     state.veil.style.backgroundColor = state.shade;
+    refreshStyle(state);
   };
 
   const refreshControls = state => {
@@ -283,7 +304,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     refreshControls(state);
   };
 
-  if (action === 'update') { current.settings = settings; paint(current); return status(current); }
+  if (action === 'update') { current.settings = settings; current.theme = theme; refreshStyle(current); paint(current); return status(current); }
   if (loading) throw new Error('An image is already loading.');
   let image = options.image;
   let prepared;
@@ -329,6 +350,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     } finally { clearTimeout(decodeTimer); if (loaded) img.removeEventListener('loadeddata', loaded); if (failed) img.removeEventListener('error', failed); }
     const width = video ? img.videoWidth : img.naturalWidth, height = video ? img.videoHeight : img.naturalHeight;
     if (!width || !height || width * height > (video ? 8_294_400 : 40_000_000) || operation.cancelled) throw new Error('Wallpaper dimensions are invalid, exceed the limit, or loading was cancelled.');
+    const pixels = samplePixels(img);
     // Prove autoplay before replacing a working wallpaper. Hidden/reduced-motion views retain a still first frame.
     if (video && !document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       let playTimer;
@@ -344,7 +366,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
       const veil = document.createElement('div'); veil.style.cssText = 'position:absolute;inset:0;pointer-events:none';
       const style = document.createElement('style'); style.id = styleId;
       style.textContent = makeStyle(runId);
-      state = { runId, layer, veil, style, controls: null, surfaces: new Set(), image, img, objectUrl: null, timer: null, refreshTimer: null, observer: null, controllerError: null, mode: options.mode === 'session' ? 'session' : 'preview', hostCommand: null };
+      state = { runId, layer, veil, style, controls: null, surfaces: new Set(), image, img, objectUrl: null, timer: null, refreshTimer: null, observer: null, controllerError: null, mode: options.mode === 'session' ? 'session' : 'preview', hostCommand: null, theme, pixels, effectiveTheme: null };
       state.motion = matchMedia('(prefers-reduced-motion: reduce)');
       state.onPlaybackChange = () => syncPlayback(state);
       document.addEventListener('visibilitychange', state.onPlaybackChange);
@@ -366,11 +388,14 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
           if (records.some(record => !state.layer.contains(record.target) && !state.controls?.contains(record.target) && record.target !== state.style)) schedule();
         });
         state.observer.observe(document.getElementById('root'), { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
+        state.themeObserver = new MutationObserver(schedule);
+        state.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
       } catch (error) { dispose(state); throw error; }
     }
     const previousUrl = state.objectUrl;
     const previousImg = state.img;
-    state.image = { name: image.name, sha256: image.sha256, mime: image.mime }; state.img = img; state.objectUrl = objectUrl; state.settings = settings; state.controllerError = null;
+    state.image = { name: image.name, sha256: image.sha256, mime: image.mime }; state.img = img; state.objectUrl = objectUrl; state.settings = settings; state.theme = theme; state.pixels = pixels; state.controllerError = null;
+    refreshStyle(state);
     state.layer.prepend(img); state.layer.append(state.veil);
     img.style.removeProperty('opacity');
     if (previousImg !== img) releaseMedia(previousImg);
@@ -390,4 +415,4 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
   }
 }
 
-export const wallpaperExpression = (action, options) => `(${wallpaperRuntime.toString()})(${JSON.stringify(action)},${JSON.stringify(options)},${normalizeSettings.toString()},${parsePrismCommand.toString()},${browserImageInfo.toString()},${wallpaperStyle.toString()})`;
+export const wallpaperExpression = (action, options) => `(${wallpaperRuntime.toString()})(${JSON.stringify(action)},${JSON.stringify(options)},${normalizeSettings.toString()},${parsePrismCommand.toString()},${browserImageInfo.toString()},${wallpaperStyle.toString()},${normalizeTheme.toString()},${deriveTheme.toString()})`;

@@ -4,7 +4,7 @@ Prism customizes the Code tab of Claude Desktop with colours, fonts, corner shap
 pictures, slideshows and videos (Wallpaper Engine `.mp4` files work). Themes can follow the app's light/dark
 setting, inherit from each other, and switch by project folder or time of day.
 
-Prism also includes a [Windows ChatGPT/Codex desktop integration](platforms/chatgpt-windows/README.md) for local image and video wallpapers, dimming, fit, position, and translucent surfaces. This is a separate engineering preview, currently verified in the Codex view of the `OpenAI.Codex` Windows app. Its setup and supported features differ from the Claude theme engine.
+Prism also includes a [Windows ChatGPT/Codex desktop integration](platforms/chatgpt-windows/README.md) for local image and video wallpapers with matching palette, font, translucent panel tint, and shape controls. This is a separate engineering preview, currently verified in the Codex view of the `OpenAI.Codex` Windows app. Its setup and supported features differ from the Claude theme engine.
 
 A community mod, not made or endorsed by Anthropic or OpenAI. The Claude integration grew out of
 [claude-desktop-themes](https://github.com/0toshigami/claude-desktop-themes) by 0toshigami, whose idea of painting

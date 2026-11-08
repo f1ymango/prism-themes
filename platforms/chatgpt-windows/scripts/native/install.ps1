@@ -21,7 +21,7 @@ $shell=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $bootstrap=Join-Path $InstallRoot 'PrismHelper.exe'
 $startupCommand='"'+$bootstrap+'"'
 if ($startupCommand.Length -gt 260) { throw 'Installation path is too long for Windows login startup' }
-$implementationVersion=6
+$implementationVersion=7
 $mustStop=$false
 if ($TestProfile) {
     if (!$NoStartup -or !$NoSkill -or $MaxSeconds -lt 1 -or $MaxSeconds -gt 300) { throw 'Fixture installs must be bounded and may not register login startup or a skill' }

@@ -1,6 +1,6 @@
 # Native setup milestone
 
-The Prism skill has working setup, status, image, dimming, fit, position, on/off, and removal routes. The implementation uses the Windows package activation mechanism established by the earlier probe. The first real user setup completed successfully. A subsequent status command reported two prepared/applied windows with no errors or restart requirement, and the user supplied a screenshot showing wallpaper in the signed-in Codex conversation view.
+The Prism skill has working setup, status, image, dimming, fit, position, matching theme, on/off, and removal routes. The implementation uses the Windows package activation mechanism established by the earlier probe. The first real user setup completed successfully. A subsequent status command reported two prepared/applied windows with no errors or restart requirement, and the user supplied a screenshot showing wallpaper in the signed-in Codex conversation view.
 
 ## User workflow
 

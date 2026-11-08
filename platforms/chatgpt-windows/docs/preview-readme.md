@@ -28,13 +28,16 @@ Select Prism in the composer's slash menu and send commands such as:
 /prism bg "C:\Wallpapers\video.mp4"
 /prism dim 40%
 /prism fit contain
+/prism theme auto
+/prism theme font rounded
+/prism theme opacity 75%
 /prism off
 /prism on
 ```
 
 Commands execute through an agent turn. PNG/JPEG/static WebP support up to 15 MiB and 40 million pixels. MP4/WebM support up to 128 MiB and 8,294,400 decoded pixels. Codec availability depends on the app; H.264 MP4 and VP8/VP9 WebM are intended inputs. Videos are muted and looping. Hidden and reduced-motion views pause playback; a new video in a hidden view loads when that view becomes visible. Larger files may take several seconds to transfer.
 
-The composer, resource cards, and Outputs/Sources panel are translucent. Reviewed top/bottom scroll fades are removed. Native styling returns with `off` or removal.
+The composer, resource cards, and Outputs/Sources panel are translucent. Each wallpaper gets a locally sampled accent, panel tint, font preset, and panel radius. `theme font`, `tint`, `accent`, `opacity`, and `radius` adjust these choices; `theme off` retains the wallpaper with neutral styling. Reviewed top/bottom scroll fades are removed. Native styling returns with `off` or removal.
 
 ## Repair and removal
 

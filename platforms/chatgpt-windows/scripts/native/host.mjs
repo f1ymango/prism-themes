@@ -96,17 +96,17 @@ async function syncRoot(app) {
             context.deferred = false;
             if (context.mediaSha === imageCache.sha256) {
               applied = await call('renew');
-              if (applied.installed) applied = await call('update', { settings: preferences.settings });
+              if (applied.installed) applied = await call('update', { settings: preferences.settings, theme: preferences.theme });
             }
             if (!applied?.installed) {
               if (imageCache.kind === 'video') {
                 context.updating = true;
                 try {
-                  applied = await transferVideo(context, imagePath, imageCache, { runId: owner, mode: 'session', persist: false, ttlMs: 20000, settings: preferences.settings }, {
+                  applied = await transferVideo(context, imagePath, imageCache, { runId: owner, mode: 'session', persist: false, ttlMs: 20000, settings: preferences.settings, theme: preferences.theme }, {
                     shouldAbort: async () => !isProcessAlive(parent) || await exists(join(state,'stop')) || await exists(join(state,'host-stop')) || await readPreferences(join(state,'preferences.json')).then(next=>!next.enabled||next.image!==imagePath),
                   });
                 } finally { context.updating = false; }
-              } else applied = await call('apply', { image: imageCache, settings: preferences.settings, restoreSaved: false });
+              } else applied = await call('apply', { image: imageCache, settings: preferences.settings, theme: preferences.theme, restoreSaved: false });
             }
           } catch (error) {
             // A rejected replacement must not expire the previous working wallpaper.
@@ -117,11 +117,13 @@ async function syncRoot(app) {
           }
           if (!applied.visible || applied.surfaceCount < 1) throw new Error('No supported background surface was found');
           context.mediaSha = imageCache.sha256;
-        } else { await call('remove'); context.mediaSha = null; }
+          context.effectiveTheme = applied.effectiveTheme;
+        } else { await call('remove'); context.mediaSha = null; context.effectiveTheme = null; }
         context.revision = revision;
       } else if (preferences.enabled) {
         const renewed = await call('renew');
         if (!renewed.installed) context.revision = null;
+        else context.effectiveTheme = renewed.effectiveTheme;
       }
       context.lastSuccess = Date.now();
       app.pageErrors.delete(id);
@@ -160,6 +162,7 @@ try {
     }));
     const status = { state: 'running', pid: process.pid, parent, enabled: preferences?.enabled ?? false, image: preferences?.image ?? null, preferencesRevision: revision,
       media: imageCache ? { kind: imageCache.kind, mime: imageCache.mime, sha256: imageCache.sha256 } : null,
+      effectiveTheme: [...roots.values()].flatMap(app => [...app.contexts.values()]).find(context => context.revision === revision && context.effectiveTheme)?.effectiveTheme ?? null,
       created: new Date(performance.timeOrigin).toISOString(),
       windows: [...roots.values()].flatMap(app => [...app.contexts].map(([targetId,c]) => ({ appPid: app.pid, targetId, deferred: !!c.deferred, applied: c.revision === revision && !!preferences?.enabled && Date.now()-c.lastSuccess<10000, lastSuccessAt: new Date(c.lastSuccess).toISOString() }))),
       attaching: [...roots.values()].reduce((count,app)=>count+app.attaching.size,0),

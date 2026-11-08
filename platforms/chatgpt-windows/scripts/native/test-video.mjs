@@ -62,7 +62,7 @@ try {
     const path = join(root, type.startsWith('video/mp4') ? 'motion.mp4' : 'motion.webm');
     await writeFile(path, Buffer.from(recorded, 'base64')); await loadLocalMedia(path); videos.push(path);
   }
-  if (videos.some(path=>path.endsWith('.mp4'))) {
+  if (videos.some(path=>path.endsWith('.mp4')) && !process.argv.includes('--quick')) {
     const mp4=videos.find(path=>path.endsWith('.mp4')),padding=Buffer.alloc(40*1024*1024);
     padding.writeUInt32BE(padding.length);padding.write('free',4);
     const padded=join(root,'large-motion.mp4');await writeFile(padded,Buffer.concat([await readFile(mp4),padding]));videos.push(padded);
@@ -86,6 +86,8 @@ try {
     await control('bg', path);
     const media=await loadLocalMedia(path,{encoding:'metadata'}),expected=media.sha256;
     await wait(async () => (await control('status')).appliedWindows > 0 && await renderer.evaluate(`globalThis.__prismWallpaperV1?.image.sha256===${JSON.stringify(expected)}`) && !!await videoStatus(), 'video command applied',45000);
+    assert.ok(/^#[0-9a-f]{6}$/.test((await control('status')).effectiveTheme?.accent));
+    report.checks.videoPaletteSampled = true;
     const start = await videoStatus(); assert.ok(start.muted && start.loop && start.width>0 && start.height>0 && start.width*start.height<=8_294_400);
     await wait(async () => { const v=await videoStatus();return !v.paused && Math.abs(v.time-start.time)>.1; }, 'video advancing');
     report.checks[path.endsWith('.mp4') ? 'mp4Playback' : 'webmPlayback'] = true;

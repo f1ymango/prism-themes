@@ -3,10 +3,11 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { normalizeSettings } from './settings.mjs';
+import { normalizeTheme } from './theme.mjs';
 
 export function validatePreferences(value, baseDirectory) {
   if (!value || value.schema !== 1 || typeof value.image !== 'string' || !value.image.trim() || typeof value.enabled !== 'boolean') throw new Error('Invalid Prism preferences.');
-  return { schema: 1, image: resolve(baseDirectory, value.image), enabled: value.enabled, settings: normalizeSettings(value.settings) };
+  return { schema: 1, image: resolve(baseDirectory, value.image), enabled: value.enabled, settings: normalizeSettings(value.settings), theme: normalizeTheme(value.theme) };
 }
 
 export async function readPreferences(filename) {

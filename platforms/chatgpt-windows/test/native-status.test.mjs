@@ -5,6 +5,7 @@ import { resolve, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { normalizeSettings } from '../src/settings.mjs';
+import { normalizeTheme } from '../src/theme.mjs';
 
 const execute = promisify(execFile);
 const base = resolve('.prism-probe/native-status-tests');
@@ -13,7 +14,7 @@ async function fixture(run) {
   const root = await mkdtemp(join(base, 'status-'));
   const state = join(root, 'state');
   await mkdir(state);
-  const preferences = { schema: 1, image: resolve('assets/prism-night.png'), enabled: true, settings: normalizeSettings({ controls: false }) };
+  const preferences = { schema: 1, image: resolve('assets/prism-night.png'), enabled: true, settings: normalizeSettings({ controls: false }), theme: normalizeTheme() };
   const fresh = { pid: process.pid, created: new Date().toISOString(), at: new Date().toISOString() };
   const data = {
     installation: { enabled: true, implementationVersion: 2 },

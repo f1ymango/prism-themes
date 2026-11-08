@@ -20,8 +20,10 @@ test('preferences reject malformed enabled/settings values before a running sess
   const base = resolve('assets');
   const value = { schema: 1, image: 'prism-night.png', enabled: true, settings: { dim: .4 } };
   assert.equal(validatePreferences(value, base).image, join(base, 'prism-night.png'));
+  assert.equal(validatePreferences(value, base).theme.mode, 'auto');
   assert.throws(() => validatePreferences({ ...value, enabled: 'yes' }, base), /Invalid/);
   assert.throws(() => validatePreferences({ ...value, settings: { dim: -1 } }, base), /Dim/);
+  assert.throws(() => validatePreferences({ ...value, theme: { tint: 'red' } }, base), /hex colour/);
 });
 
 test('a failed JSON serialization preserves the last saved preferences', async t => {
