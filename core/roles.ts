@@ -34,6 +34,9 @@ export const BASE_RULES: RoleRule[] = [
   },
 ]
 
+/** The glow behind text over a background; its size is the text.halo setting (0 makes it invisible). */
+const HALO = '0 0 calc(var(--prism-halo-size, 8px) * 0.375) var(--prism-halo), 0 0 var(--prism-halo-size, 8px) var(--prism-halo)'
+
 /** A background the page draws. Every rule waits on html[data-tfc-wall], which wallReady() grants. */
 export const WALL_RULES: RoleRule[] = [
   {
@@ -45,20 +48,20 @@ export const WALL_RULES: RoleRule[] = [
   { id: 'wall-content', roles: ['content'], css: 'html[data-tfc-wall] @{content} { background: transparent !important; }' },
   { id: 'wall-tiles', roles: ['tiles'], css: 'html[data-tfc-wall] @{tiles} { background: transparent !important; }' },
   { id: 'wall-grid', roles: ['grid'], css: 'html[data-tfc-wall] @{grid} { background: transparent !important; }' },
-  { id: 'glass', roles: ['composer'], css: 'html[data-tfc-wall] @{composer} { background: var(--prism-glass) !important; backdrop-filter: blur(10px); }' },
+  { id: 'glass', roles: ['composer'], css: 'html[data-tfc-wall] @{composer} { background: var(--prism-glass) !important; backdrop-filter: blur(var(--prism-composer-blur, 10px)); }' },
   // Side panels over a background. The page marks them (data-tfc-panel) and the big solid layers inside them
   // (data-tfc-clear) itself, by size and colour rather than by class name, so a renamed inner class changes nothing.
   {
     id: 'panels', roles: [],
     css: 'html[data-tfc-wall] [data-tfc-clear] { background-color: transparent !important; background-image: none !important; ' +
       '--df-web-sidebar-bg: transparent !important; }\n' +
-      'html[data-tfc-wall][data-tfc-panels=glass] [data-tfc-panel] { background: var(--prism-glass) !important; ' +
-      'backdrop-filter: blur(14px) saturate(1.2); }\n' +
+      'html[data-tfc-wall][data-tfc-panels=glass] [data-tfc-panel] { background: var(--prism-panel, var(--prism-glass)) !important; ' +
+      'backdrop-filter: blur(var(--prism-panel-blur, 14px)) saturate(1.2); }\n' +
       'html[data-tfc-wall][data-tfc-panels=clear] [data-tfc-panel] { background: transparent !important; }\n' +
-      'html[data-tfc-wall][data-tfc-panels] [data-tfc-panel] { text-shadow: 0 0 3px var(--prism-halo), 0 0 8px var(--prism-halo); }',
+      `html[data-tfc-wall][data-tfc-panels] [data-tfc-panel] { text-shadow: ${HALO}; }`,
   },
   // all text in the content area, the faint lines too (notices, command output), not only the transcript's prose
-  { id: 'halo', roles: ['content'], css: 'html[data-tfc-wall] @{content} { text-shadow: 0 0 3px var(--prism-halo), 0 0 8px var(--prism-halo); }' },
+  { id: 'halo', roles: ['content'], css: `html[data-tfc-wall] @{content} { text-shadow: ${HALO}; }` },
 ]
 
 /** C5: reactions to what Claude is doing, from the session's own event file. */

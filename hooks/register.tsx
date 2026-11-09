@@ -6,6 +6,8 @@ import type { CustomBackground } from '../core/media'
 import { gradientSvg, resolve } from '../core/resolve'
 import type { Panels, Theme } from '../core/resolve'
 import { pickRule } from '../core/schema'
+import { ALIASES, changedSummary, cleanSettings, describeSettings, findSetting, migrateLegacy, parseValue } from '../core/settings'
+import type { Settings } from '../core/settings'
 import { THEMES } from '../core/themes'
 import type { Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
@@ -73,11 +75,18 @@ async function loadCustom($: EngineInterface): Promise<CustomBackground | undefi
   return bg && Array.isArray(bg.files) && bg.files.length ? bg : undefined
 }
 
-/** The person's explicit /prism panels choice, if any (a theme may set its own default). */
-async function loadPanels($: EngineInterface): Promise<Panels | undefined> {
-  const p = await $.store.get('panels')
-  return p === 'glass' || p === 'clear' || p === 'solid' ? p : undefined
+/** Every /prism set value. The first time, the values older versions kept on their own move in. */
+async function loadSettings($: EngineInterface): Promise<Settings> {
+  const raw = await $.store.get('settings')
+  if (raw && typeof raw === 'object') return cleanSettings(raw)
+  const moved = migrateLegacy({
+    panels: await $.store.get('panels'), panelTint: await $.store.get('panelTint'), panelBlur: await $.store.get('panelBlur'),
+  })
+  await $.store.set('settings', moved)
+  return moved
 }
+const num = (s: Settings, k: string) => (typeof s[k] === 'number' ? (s[k] as number) : undefined)
+const choice = (s: Settings, k: string) => (typeof s[k] === 'string' ? (s[k] as string) : undefined)
 
 async function showCustom($: EngineInterface, bg: CustomBackground | undefined) {
   await update($, custom, () => bg
@@ -109,10 +118,25 @@ async function payloadFor($: EngineInterface, id: string, slot: string) {
   const bg = (await loadCustom($)) ?? (await themeMedia($, t))
   const files = discovery.os ? await ensureAssets($, discovery.os, slot, bg) : []
   const t1 = await read($, tier1)
+  const s = await loadSettings($)
+  const fit = choice(s, 'background.fit')
   return resolve(t, {
-    panels: await loadPanels($),
+    panels: choice(s, 'panels.style') as Panels | undefined,
+    panelTint: num(s, 'panels.tint'),
+    panelBlur: num(s, 'panels.blur'),
+    composerTint: num(s, 'composer.tint'),
+    composerBlur: num(s, 'composer.blur'),
+    haloSize: num(s, 'text.halo'),
+    reactions: choice(s, 'reactions') !== 'off',
     backgroundByPage: !!t?.background && !t1?.isDrawn,
-    media: bg && files.length ? { provider: bg.provider, files, interval: bg.interval, fit: bg.fit, dim: bg.dim } : undefined,
+    media: bg && files.length
+      ? {
+        provider: bg.provider, files,
+        interval: num(s, 'background.interval') ?? bg.interval,
+        fit: fit === 'cover' || fit === 'contain' ? fit : bg.fit,
+        dim: num(s, 'background.dim') ?? bg.dim,
+      }
+      : undefined,
   })
 }
 
@@ -131,7 +155,7 @@ async function applyTheme($: EngineInterface, id: string) {
   }
   const t2 = await read($, tier2)
   if (tier2Ready(t2)) await writePayload($, t2.slot, await payloadFor($, t ? t.id : 'claude', t2.slot))
-  const effective = (await loadPanels($)) ?? t?.panels ?? 'glass'
+  const effective = (choice(await loadSettings($), 'panels.style') as Panels | undefined) ?? t?.panels ?? 'glass'
   await update($, panels, () => effective)
   $.ui.status(statusOf(t, 'idle'))
 }
@@ -208,8 +232,34 @@ async function doctor($: EngineInterface): Promise<string> {
     `  for ${cwd || 'this session'} now: ${rule ? `use ${rule.use}` : 'no rule matches'}`,
     '',
     `Background: ${bg ? `${bg.provider}, ${bg.files.length} file(s)` : 'none of your own'}; side panels: ${await read($, panels)}`,
+    '',
+    'Settings (/prism set <key> <value>, /prism reset <key|all>):',
+    ...describeSettings(await loadSettings($)).map(l => `  ${l}`),
   ]
   return lines.join('\n')
+}
+
+/** /prism set <key> <value> (and its shortcuts): validate, store, apply, and say what changed. */
+async function changeSetting($: EngineInterface, key: string, raw: string): Promise<string> {
+  const def = findSetting(key)
+  if (typeof def === 'string') return def
+  const settings = await loadSettings($)
+  if (raw.trim().toLowerCase() === 'default') {
+    delete settings[def.key]
+  } else {
+    if (!raw.trim()) {
+      const now = settings[def.key] ?? def.fallback
+      return `${def.key}: ${now ?? 'the theme\'s own'}. ${def.help}. Change it with /prism set ${def.key} <value>.`
+    }
+    const parsed = parseValue(def, raw)
+    if ('error' in parsed) return `Usage: /prism set ${def.key} <value> — ${parsed.error}, or default`
+    settings[def.key] = parsed.value
+  }
+  await $.store.set('settings', settings)
+  await applyTheme($, await read($, current))
+  const v = settings[def.key]
+  const unit = def.spec.type === 'number' && def.spec.unit ? def.spec.unit : ''
+  return `${def.key}: ${v === undefined ? `back to its default (${def.fallback ?? 'the theme\'s own'})` : `${v}${unit}`}. ${def.help}.`
 }
 
 /** /prism <word> ...: settings and tools. */
@@ -232,27 +282,27 @@ async function setting($: EngineInterface, args: string): Promise<string> {
       if (got.skipped.length) $.ui.log(`prism-themes: skipped ${got.skipped.length}: ${got.skipped.slice(0, 5).join('; ')}`)
       break
     }
-    case 'dim': {
-      const n = Number(value)
-      if (!bg || !Number.isFinite(n) || n < 0 || n > 0.9) return bg ? 'Usage: /prism dim <0 to 0.9>' : 'Set a background first: /prism bg <file>'
-      next = { ...bg, dim: n }
-      break
+    case 'set': {
+      // /prism set → every setting; /prism set <key> <value> → change one
+      const [key = '', ...rest] = value.split(/\s+/)
+      if (!key) return ['Prism settings (/prism set <key> <value>, /prism reset <key|all>):', '', ...describeSettings(await loadSettings($))].join('\n')
+      return changeSetting($, key, rest.join(' '))
     }
-    case 'fit':
-      if (!bg || (value !== 'cover' && value !== 'contain')) return bg ? 'Usage: /prism fit cover|contain' : 'Set a background first: /prism bg <file>'
-      next = { ...bg, fit: value }
-      break
-    case 'every': {
-      const n = Number(value.replace(/s$/, ''))
-      if (!bg || !Number.isFinite(n) || n < 5) return bg ? 'Usage: /prism every <seconds, 5 or more>' : 'Set a background first: /prism bg <folder>'
-      next = { ...bg, interval: n }
-      break
-    }
-    case 'panels': {
-      if (value !== 'glass' && value !== 'clear' && value !== 'solid') return 'Usage: /prism panels glass|clear|solid'
-      await $.store.set('panels', value)
+    case 'reset': {
+      if (!value) return 'Usage: /prism reset <key> — or /prism reset all'
+      const settings = await loadSettings($)
+      let done = 'All settings are back to their defaults.'
+      if (value.toLowerCase() === 'all') {
+        await $.store.set('settings', {})
+      } else {
+        const def = findSetting(value)
+        if (typeof def === 'string') return def
+        delete settings[def.key]
+        await $.store.set('settings', settings)
+        done = `${def.key} is back to its default (${def.fallback ?? 'the theme\'s own'}).`
+      }
       await applyTheme($, await read($, current))
-      return `Side panels: ${value}. They follow a background (a theme's or yours); without one they stay as they are.`
+      return done
     }
     case 'use': {
       if (value !== 'claude' && !themeById(value)) return `No theme "${value}". /prism doctor lists yours.`
@@ -275,8 +325,10 @@ async function setting($: EngineInterface, args: string): Promise<string> {
     case 'doctor':
       return doctor($)
     default:
-      return `Unknown: ${word}. Try /prism, /prism use <id>, /prism bg <file|folder>, /prism bg off, /prism dim 0.3, ` +
-        '/prism fit contain, /prism every 30, /prism panels glass|clear|solid, /prism import <folder>, /prism reload, /prism doctor'
+      // the short commands that came first: /prism glass 0.3 is /prism set panels.tint 0.3
+      if (ALIASES[word.toLowerCase()]) return changeSetting($, word, value)
+      return `Unknown: ${word}. Try /prism, /prism use <id>, /prism bg <file|folder>, /prism bg off, /prism set (every adjustable ` +
+        'part: panels, composer, background, text halo, reactions), /prism reset <key|all>, /prism import <folder>, /prism reload, /prism doctor'
   }
   if (next) await $.store.set('background', next)
   else await $.store.delete('background')
@@ -441,7 +493,7 @@ export const register: Register = on => {
             : tier1Text(t1)}`}</Text>
           <Text dimColor>{`Extension: ${TIER2_TEXT[st]}`}</Text>
           <Text dimColor>{`Background: ${customText(c)}`}</Text>
-          <Text dimColor>{`Side panels over it: ${await read($, panels)} (/prism panels glass|clear|solid)`}</Text>
+          <Text dimColor>{`Adjusted: ${changedSummary(await loadSettings($)) || 'nothing yet'} (/prism set lists every setting)`}</Text>
           <Text dimColor>{`Claude data folder: ${f?.userData ?? 'not found'}${f?.source ? ` (from ${f.source})` : ''}`}</Text>
           {lib?.ruleUse && !manual ? <Text dimColor>{`Chosen by your rules: ${themeById(lib.ruleUse)?.name ?? lib.ruleUse}`}</Text> : null}
           {lib?.problems ? <Text color="warning">{`${lib.problems} theme file(s) of yours have errors: /prism doctor`}</Text> : null}

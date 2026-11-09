@@ -89,14 +89,36 @@ Prism uses the official API where the app supports it and the extension elsewher
 | `/prism use <id>` | switch theme for this session |
 | `/prism bg <file or folder>` | your own background: a picture, an animated SVG, a video, a folder of pictures (a slideshow), or a folder holding one video (a Wallpaper Engine wallpaper) |
 | `/prism bg off` | back to the theme's own background |
-| `/prism dim 0.3`, `/prism fit contain`, `/prism every 30` | dim, fit, and slideshow interval |
-| `/prism panels glass\|clear\|solid` | how the side panels sit over a background |
+| `/prism set` | list every adjustable part, its value and its range (see below) |
+| `/prism set <key> <value>` | change one, e.g. `/prism set panels.blur 0` |
+| `/prism reset <key>`, `/prism reset all` | back to the defaults |
 | `/prism reload` | re-read your themes folder |
 | `/prism import <folder>` | import themes made for claude-desktop-themes |
 | `/prism doctor` | what Prism found: the app's data folder, both drawing paths, your themes and their problems, the rule in force |
 
 Files are judged by their content, not their name, with size limits of 15 MB per picture, 2 MB per SVG and 50 MB
 per video.
+
+### Settings
+
+They apply on top of whichever theme is on, and stay when you switch themes.
+
+| Key | Range | Default | What it changes |
+| --- | --- | --- | --- |
+| `panels.style` | glass, clear, solid | glass | side panels over a background |
+| `panels.tint` | 0–0.9 | 0.4 | how strongly glass panels are tinted (lower is clearer) |
+| `panels.blur` | 0–40 px | 14 | blur behind glass panels (0 is crisp) |
+| `composer.tint` | 0–0.9 | 0.6 | tint of the box you type in, over a background |
+| `composer.blur` | 0–40 px | 10 | blur behind the box you type in |
+| `background.dim` | 0–0.9 | the theme's | veil over a picture or video background |
+| `background.fit` | cover, contain | the theme's | fill the window, or show the whole picture |
+| `background.interval` | 5–3600 s | the theme's | seconds per picture in a slideshow |
+| `text.halo` | 0–20 px | 8 | glow around text over a background (0 turns it off) |
+| `reactions` | on, off | on | composer glow while a tool runs, shake on errors, edge glow while waiting |
+
+Shortcuts: `/prism glass`, `blur`, `panels`, `dim`, `fit` and `every` set `panels.tint`, `panels.blur`,
+`panels.style`, `background.dim`, `background.fit` and `background.interval`. For crisp panels like a sheet of
+tinted glass: `/prism set panels.blur 0` and `/prism set panels.tint 0.55`.
 
 ## Your own themes
 

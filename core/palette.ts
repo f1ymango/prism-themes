@@ -62,10 +62,14 @@ export const varsOf = (p: Palette): Record<string, string> => {
   for (const k of ['accent-brand', 'brand-100', 'accent-000', 'accent-100', 'accent-200']) vars[k] = hsl(ac)
   // our own, read by our stylesheet
   vars['prism-sidebar'] = at(bg, tx, 0.04)
-  vars['prism-glass'] = rgba(p.bg, 0.6)
+  vars['prism-glass'] = rgba(p.bg, 0.6) // the composer: where you type and read most
+  vars['prism-panel'] = rgba(p.bg, PANEL_TINT) // side panels over a background: lighter, so more of it shows
   vars['prism-halo'] = p.bg
   return vars
 }
+
+/** How strongly the side panels are tinted over a background, 0 (clear) to 0.9; /prism glass changes it. */
+export const PANEL_TINT = 0.4
 
 export const FONT_VARS = ['cds-font-sans', 'cds-font-sans-display', 'font-anthropic-sans', 'font-anthropic-serif', 'font-sans']
 export const isFont = (f: unknown): f is string => typeof f === 'string' && /^[\w\s,"'-]{1,200}$/.test(f)
