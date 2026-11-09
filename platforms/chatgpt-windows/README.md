@@ -148,7 +148,7 @@ The older launcher keeps a loopback-only Chrome DevTools Protocol listener open 
 
 ## Validation and limits
 
-The declared automated suite passes 43 tests on Windows:
+The declared automated suite passes 44 tests on Windows:
 
 ```powershell
 node --test (Get-ChildItem -LiteralPath test -Filter '*.test.mjs').FullName
@@ -160,6 +160,6 @@ The isolated wallpaper proof also verified PNG/JPEG/WebP decoding, image switchi
 
 The in-app control proof also passed file selection through Prism's own HTML input, invalid-file recovery, commands, keyboard toggling, local image/settings restoration after reinjection, and keyboard-handler removal. The file input was populated through CDP; the OS file-dialog interaction itself was not automated.
 
-An already-open signed-in Prism window was updated without restarting it; its image, settings, process, and installed-file hashes were preserved. The native integration has also passed an owned visible-window MP4/WebM playback and cleanup check. Actual Windows login, long sessions, detached windows, Chat/Work views, and future app releases remain unverified.
+An already-open signed-in Prism window was updated without restarting it; its image, settings, process, and installed-file hashes were preserved. The native integration has also passed an owned visible-window MP4/WebM playback and cleanup check. An isolated host-restart test with the Miku Starlight MP4 confirmed that unexpected host exit and reattachment preserve the video element and decoder. Actual Windows login, long sessions, detached windows, Chat/Work views, and future app releases remain unverified.
 
 See [in-app controls](docs/in-app-controls.md), [the launcher milestone](docs/milestone-2.md), and the [original loading experiment](docs/phase-1-findings.md). The original Claude Prism project is [f1ymango/prism-themes](https://github.com/f1ymango/prism-themes).

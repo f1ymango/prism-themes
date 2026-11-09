@@ -45,8 +45,9 @@ try {
   renderer.client.close();
   renderer = await connectRenderer(session, { worldName: `prism-persistent-${owner}`, targetId: visibleTarget, signal: AbortSignal.timeout(45000) });
   assert.equal(await renderer.evaluate('document.hidden'),false);
-  const supported = discoveryOnly ? [] : await renderer.evaluate(`['video/webm;codecs=vp8','video/mp4'].filter(type=>MediaRecorder.isTypeSupported(type))`);
-  if(!discoveryOnly)assert.ok(supported.some(type => type.startsWith('video/webm')));
+  const sampleOnly = process.argv.includes('--sample-only');
+  const supported = discoveryOnly || sampleOnly ? [] : await renderer.evaluate(`['video/webm;codecs=vp8','video/mp4'].filter(type=>MediaRecorder.isTypeSupported(type))`);
+  if(!discoveryOnly && !sampleOnly)assert.ok(supported.some(type => type.startsWith('video/webm')));
   report.observations.recorderTypes = supported;
   const videos = [];
   for (const type of supported) {
@@ -71,6 +72,7 @@ try {
     const maximum=join(root,'maximum-motion.mp4');await writeFile(maximum,Buffer.concat([await readFile(mp4),upperPadding]));videos.push(maximum);
   }
   const sampleIndex=process.argv.indexOf('--sample-video');
+  if(sampleOnly && sampleIndex<0)throw new Error('--sample-only requires --sample-video <path>');
   if(sampleIndex>=0)videos.push(resolve(process.argv[sampleIndex+1]));
   console.log(JSON.stringify({stage:'Generated procedural video fixtures',supported}));
   const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${session.child.pid}).StartTime.ToUniversalTime().ToFileTimeUtc().ToString()`], { windowsHide: true });
@@ -104,6 +106,16 @@ try {
   assert.equal(await renderer.evaluate(`globalThis.prismPreviousVideo===document.querySelector('#prism-wallpaper-v1 video')`),true);report.checks.repeatedSelectionPreservesDecoder=true;
   const duration=await renderer.evaluate(`document.querySelector('#prism-wallpaper-v1 video').duration`);
   if(Number.isFinite(duration)&&duration>.4){await renderer.evaluate(`document.querySelector('#prism-wallpaper-v1 video').currentTime=${duration-.08}`);await wait(async()=>{const v=await videoStatus();return !v.paused&&v.time<duration-.2;},'loop wraps');report.checks.loopWraps=true;}
+  clearInterval(heartbeat);
+  await saveJson(join(state, 'worker.json'), { state: 'armed', pid: process.pid, created: 'replaced-worker', at: new Date().toISOString() });
+  await wait(async () => host.exitCode !== null, 'old renderer host to exit after worker identity changed');
+  assert.equal(await renderer.evaluate(`globalThis.prismPreviousVideo===document.querySelector('#prism-wallpaper-v1 video')`), true);
+  report.checks.unexpectedHostExitPreservesVideo = true;
+  await beat(); heartbeat = setInterval(() => beat().catch(() => {}), 2000);
+  host = spawn(process.execPath, [resolve('scripts/native/host.mjs'), '--root', root, '--parent', String(process.pid)], { windowsHide: true, stdio: 'ignore' });
+  await wait(async () => (await control('status')).appliedWindows > 0, 'renderer host to reattach to existing video');
+  assert.equal(await renderer.evaluate(`globalThis.prismPreviousVideo===document.querySelector('#prism-wallpaper-v1 video')`), true);
+  report.checks.hostReattachPreservesVideoDecoder = true;
   await renderer.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }, { sessionId: renderer.sessionId });
   await wait(async () => (await videoStatus()).paused, 'reduced-motion pause');
   await renderer.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }, { sessionId: renderer.sessionId });

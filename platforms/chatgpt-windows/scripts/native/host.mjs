@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { appendFile, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { execFile } from 'node:child_process';
@@ -9,13 +9,14 @@ import { wallpaperExpression } from '../../src/wallpaper.mjs';
 import { loadLocalMedia } from '../../src/media.mjs';
 import { transferVideo } from '../../src/media-transfer.mjs';
 import { readPreferences, saveJson, claimManagerLock, isProcessAlive } from '../../src/preferences.mjs';
+import { readWorkerHeartbeat } from '../../src/worker-heartbeat.mjs';
 
 const { values } = parseArgs({ options: { root: { type: 'string' }, parent: { type: 'string' } } });
 const root = values.root;
 const state = join(root, 'state');
 const installation = JSON.parse(await readFile(join(root, 'installation.json'), 'utf8'));
 const parent = Number(values.parent);
-const parentCreated = JSON.parse(await readFile(join(state, 'worker.json'), 'utf8')).created;
+const parentCreated = (await readWorkerHeartbeat(join(state, 'worker.json'))).created;
 const release = await claimManagerLock(join(state, 'host.lock'));
 if (!release) process.exit(0);
 const execute = promisify(execFile);
@@ -90,14 +91,13 @@ async function syncRoot(app) {
         if (preferences.enabled) {
           let applied;
           try {
-            if (imageCache.kind === 'video' && context.mediaSha !== imageCache.sha256 && await context.evaluate('document.hidden')) {
-              await call('renew'); context.deferred = true; app.pageErrors.delete(id); return;
+            const current = await call('renew');
+            if (current.installed && current.image?.sha256 === imageCache.sha256) {
+              applied = await call('update', { settings: preferences.settings, theme: preferences.theme });
+            } else if (imageCache.kind === 'video' && await context.evaluate('document.hidden')) {
+              context.deferred = true; app.pageErrors.delete(id); return;
             }
             context.deferred = false;
-            if (context.mediaSha === imageCache.sha256) {
-              applied = await call('renew');
-              if (applied.installed) applied = await call('update', { settings: preferences.settings, theme: preferences.theme });
-            }
             if (!applied?.installed) {
               if (imageCache.kind === 'video') {
                 context.updating = true;
@@ -136,8 +136,9 @@ async function syncRoot(app) {
 
 try {
   while (isProcessAlive(parent) && !await exists(join(state, 'stop')) && !await exists(join(state, 'host-stop'))) {
-    if (Date.now() - (await stat(join(state, 'worker.json'))).mtimeMs > 20000) break;
-    const heartbeat = JSON.parse(await readFile(join(state, 'worker.json'), 'utf8'));
+    const heartbeat = await readWorkerHeartbeat(join(state, 'worker.json'));
+    const heartbeatAt = Date.parse(heartbeat.at);
+    if (!Number.isFinite(heartbeatAt) || Date.now() - heartbeatAt > 20000) break;
     if (heartbeat.pid !== parent || heartbeat.created !== parentCreated) break;
     try {
       const next = await readPreferences(join(state, 'preferences.json'));
@@ -171,13 +172,18 @@ try {
     await publishStatus(status);
     await delay(2000);
   }
+} catch (error) {
+  await appendFile(join(state, 'host-failures.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), code: error.code ?? null, message: error.message, stack: error.stack })}\n`).catch(() => {});
+  throw error;
 } finally {
   clearInterval(statusHeartbeat);
   await Promise.allSettled([...pending.values()]);
   for (const app of roots.values()) { app.disposed=true;for(const task of app.attaching.values())task.controller.abort(); }
   await Promise.allSettled([...roots.values()].flatMap(app=>[...app.attaching.values()].map(t=>t.task)));
+  const stopping = await exists(join(state, 'stop')) || await exists(join(state, 'host-stop'));
   await Promise.allSettled([...roots.values()].flatMap(app => [...app.contexts.values()].map(async context => {
-    try { await context.evaluate(wallpaperExpression('remove', { runId: owner })); } finally { context.client.close(); }
+    try { if (stopping) await context.evaluate(wallpaperExpression('remove', { runId: owner })); }
+    finally { context.client.close(); }
   })));
   for (const app of roots.values()) app.client.close();
   await statusWrites.catch(()=>{});

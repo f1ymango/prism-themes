@@ -44,6 +44,15 @@ function Write-PrismJson([string]$Path, $Value) {
         }
     } finally { if(Test-Path -LiteralPath $temporary){[IO.File]::Delete($temporary)} }
 }
+function Read-PrismJson([string]$Path) {
+    for($attempt=0;$true;$attempt++) {
+        try { return ([IO.File]::ReadAllText($Path,[Text.Encoding]::UTF8) | ConvertFrom-Json) }
+        catch {
+            if($attempt -ge 7 -or ($_.Exception -isnot [IO.IOException] -and $_.Exception.InnerException -isnot [IO.IOException] -and $_.Exception -isnot [UnauthorizedAccessException])) { throw }
+            Start-Sleep -Milliseconds (20 * [Math]::Pow(2,[Math]::Min($attempt,3)))
+        }
+    }
+}
 function Stop-PrismWorker([string]$Root, $Installation) {
     $state=Join-Path $Root 'state'
     [IO.File]::WriteAllText((Join-Path $state 'stop'),$Installation.id)
@@ -53,7 +62,7 @@ function Stop-PrismWorker([string]$Root, $Installation) {
         foreach ($name in @('worker.json','supervisor.json')) {
             $statusPath=Join-Path $state $name
             if (Test-Path -LiteralPath $statusPath) {
-                $status=Get-Content -LiteralPath $statusPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $status=Read-PrismJson $statusPath
                 $process=Get-Process -Id $status.pid -ErrorAction SilentlyContinue
                 if ($process -and $process.StartTime.ToUniversalTime().ToString('o') -eq $status.created) { $alive=$true }
             }

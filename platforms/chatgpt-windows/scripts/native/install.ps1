@@ -36,7 +36,7 @@ if (Test-Path -LiteralPath $InstallRoot) {
     if (!$NoStartup -and $existingRun -and $existingRun -ne $startupCommand -and $existingRun -ne $installation.startupCommand) { throw 'A different Prism startup entry was preserved' }
     $workerStatusPath=Join-Path $state 'worker.json'
     if (Test-Path -LiteralPath $workerStatusPath) {
-        $workerStatus=Get-Content -LiteralPath $workerStatusPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $workerStatus=Read-PrismJson $workerStatusPath
         $running=Get-Process -Id $workerStatus.pid -ErrorAction SilentlyContinue
         if (!$Upgrade -and !$CheckBuild -and $installation.implementationVersion -eq $implementationVersion -and $installation.enabled -and $running -and $running.StartTime.ToUniversalTime().ToString('o') -eq $workerStatus.created -and $workerStatus.state -eq 'armed' -and ([DateTime]::UtcNow-[DateTime]::Parse($workerStatus.at)).TotalSeconds -lt 15) {
             if (!$NoStartup) { New-Item -Path $runKey -Force | Out-Null; New-ItemProperty -LiteralPath $runKey -Name $runName -Value $startupCommand -PropertyType String -Force | Out-Null }
@@ -116,7 +116,7 @@ try {
     do {
         Start-Sleep -Milliseconds 300
         if (Test-Path -LiteralPath (Join-Path $state 'worker.json')) {
-            $status=Get-Content -LiteralPath (Join-Path $state 'worker.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $status=Read-PrismJson (Join-Path $state 'worker.json')
             if ([DateTime]::Parse($status.created).ToUniversalTime() -lt $launchedAt) { continue }
             if ($status.state -eq 'error' -or $status.state -eq 'unsupported') { throw $status.message }
             if ($status.state -eq 'armed' -and ([DateTime]::UtcNow-[DateTime]::Parse($status.at)).TotalSeconds -lt 10) { $deployed=$true;break }
