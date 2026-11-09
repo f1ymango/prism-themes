@@ -2,7 +2,7 @@
 
 A Windows image and video wallpaper integration controlled through the ChatGPT composer's Prism skill. Each new wallpaper also gets a matching local theme: a sampled accent, readable translucent panel tint, font preset, and rounded panel shape. The first install registers the skill and a user-scoped background helper; after one full app restart, ordinary Windows activation prepares the app for live commands.
 
-Verified on Windows package OpenAI.Codex 26.1103.4239.0, embedded app 26.1103.32239. After app updates, `/prism repair` tests an unfamiliar build in an isolated profile before approving its fingerprint. MP4/WebM playback and cleanup passed in an owned visible app window. Actual Windows login, hours-long sessions, detached windows, Chat/Work views, a future app release, and gaming performance remain unverified. See the [current roadmap](docs/roadmap.md), [update compatibility](docs/update-compatibility.md), and [video milestone](docs/video-wallpaper.md).
+Verified on Windows package OpenAI.Codex 26.1103.4239.0, embedded app 26.1103.32239. A separate installation on package 26.1103.3517.0 passed the isolated compatibility probe and displayed the Miku Starlight MP4 in a signed-in Codex window. After app updates, `/prism repair` tests an unfamiliar build in an isolated profile before approving its fingerprint. MP4/WebM playback and cleanup passed in an owned visible app window. Actual Windows login, hours-long sessions, detached windows, Chat/Work views, a future app release, and gaming performance remain unverified. See the [current roadmap](docs/roadmap.md), [update compatibility](docs/update-compatibility.md), and [video milestone](docs/video-wallpaper.md).
 
 ## First install and native composer commands
 
@@ -36,6 +36,25 @@ The installer registers the Prism skill. Once it reports ready, fully quit ChatG
 | `/prism off` / `/prism on` | Restore appearance or re-enable the saved image |
 | `/prism status` | Report helper state, prepared windows, and restart requirements |
 | `/prism remove` | Disable the callback and login startup; restore attached windows |
+
+## Miku Starlight example
+
+With your own copy of [初音-AniLuoty](https://steamcommunity.com/sharedfiles/filedetails/?id=3702521609), the following commands reproduce a theme verified in a normal signed-in Codex window. Replace the example path with the location of your video. The wallpaper stays local and is not included in this repository.
+
+```text
+/prism bg "C:\path\to\初音.mp4"
+/prism dim 48%
+/prism fit cover
+/prism position center
+/prism theme font rounded
+/prism theme tint #121d31
+/prism theme accent #62e4dc
+/prism theme opacity 78%
+/prism theme radius 18
+/prism theme save "Miku Starlight"
+```
+
+The deep navy tint keeps panels readable over the bright video, while the teal accent follows Miku's hair. Use `/prism theme use "Miku Starlight"` to restore the saved combination after switching wallpapers. Each command runs through a Prism agent turn; the saved theme is local to that installation rather than a Claude schema-2 JSON file.
 
 Removal retains local wallpaper files and the skill for reinstall. Fully restart the app to close an already-open debugging endpoint. Setup and removal do not automatically close app windows. See [native setup](docs/native-setup.md) for implementation, verification, and limits.
 

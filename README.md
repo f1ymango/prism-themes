@@ -1,19 +1,20 @@
 # Prism Themes
 
-Prism customizes the Code tab of Claude Desktop with colours, fonts, corner shapes, and backgrounds, including your own
-pictures, slideshows and videos (Wallpaper Engine `.mp4` files work). Themes can follow the app's light/dark
-setting, inherit from each other, and switch by project folder or time of day.
+Prism has two desktop integrations:
 
-Prism also includes a [Windows ChatGPT/Codex desktop integration](platforms/chatgpt-windows/README.md) for local image and video wallpapers with matching palette, font, translucent panel tint, and shape controls. This is a separate engineering preview, currently verified in the Codex view of the `OpenAI.Codex` Windows app. Its setup and supported features differ from the Claude theme engine.
+- **[ChatGPT/Codex on Windows](platforms/chatgpt-windows/README.md):** local image and looping video wallpapers, with matching translucent panels, accent colour, font and corner shape. This engineering preview is verified in the Codex view of the `OpenAI.Codex` Windows app.
+- **Claude Desktop:** colours, fonts, corner shapes, and picture, slideshow or video backgrounds for the Code tab. Themes can follow light/dark mode, inherit from each other, and switch by project folder or time of day.
+
+The integrations have different installation steps and theme formats. Wallpaper Engine `.mp4` files work in both.
 
 A community mod, not made or endorsed by Anthropic or OpenAI. The Claude integration grew out of
 [claude-desktop-themes](https://github.com/0toshigami/claude-desktop-themes) by 0toshigami, whose idea of painting
 the app through its React DevTools extension slot it builds on.
 
-> **Unofficial.** Prism restyles the app through parts Claude Desktop does not document. An app update can break
-> some of it; Prism is built to turn off only the affected parts, and `/prism doctor` says what it found.
+> **Unofficial.** Both integrations use app internals that can change after an update. The Codex integration checks
+> unfamiliar builds in an isolated profile; Claude Desktop's `/prism doctor` reports which drawing paths still work.
 
-## See it
+## Claude Desktop demos
 
 | Afterschool Rain | Punklorde | Miku |
 | :-: | :-: | :-: |
@@ -25,6 +26,26 @@ The backgrounds are Wallpaper Engine wallpapers by their own creators, not part 
 [Punklorde (desktop resolution)](https://steamcommunity.com/sharedfiles/filedetails/?id=3422072291) and
 [初音-AniLuoty](https://steamcommunity.com/sharedfiles/filedetails/?id=3702521609) on the Steam Workshop.
 Prism ships none of them; you point a theme at a file you already have.
+
+## Codex on Windows
+
+The [Codex implementation](platforms/chatgpt-windows/README.md) applies a local image or muted looping MP4/WebM to the regular signed-in Windows app. It samples a matching theme, then lets you adjust the font, panel tint, accent, opacity and corners. These are saved together with the wallpaper and can be restored by name. It does not use Claude's JSON theme files.
+
+Install Node.js 22 or later, then from `platforms/chatgpt-windows` run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+Fully quit ChatGPT/Codex, including its tray process, and reopen it. Select Prism from the composer's slash list. For example, with your own copy of the [Miku wallpaper](https://steamcommunity.com/sharedfiles/filedetails/?id=3702521609):
+
+```text
+/prism bg "C:\path\to\初音.mp4"
+```
+
+Tailor and save a theme with `/prism dim`, `/prism theme tint`, `/prism theme accent`, `/prism theme font`, `/prism theme opacity`, `/prism theme radius`, and `/prism theme save`. The complete [Miku Starlight recipe](platforms/chatgpt-windows/README.md#miku-starlight-example) shows values that work with this video. After saving it, `/prism theme use "Miku Starlight"` restores the combination. Prism keeps the media in a local store; this repository does not include the wallpaper.
+
+The Windows integration registers a current-user helper and a package debug callback. Its [setup and limits](platforms/chatgpt-windows/docs/preview-readme.md) explain the local debugging endpoint, compatibility check and removal path. The separately managed image-only prototype remains documented in the platform README.
 
 ## Install for Claude Desktop
 
