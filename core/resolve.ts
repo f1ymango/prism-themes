@@ -113,8 +113,8 @@ export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | R
   }
   if (mode === 'light') vars['prism-controls'] = t!.palette.text
   const variants = t?.variants && {
-    light: { ...varsOf(t.variants.light), 'prism-controls': t.variants.light.text },
-    dark: varsOf(t.variants.dark),
+    light: { ...varsOf(t.variants.light), 'prism-controls': t.variants.light.text } as Record<string, string>,
+    dark: varsOf(t.variants.dark) as Record<string, string>,
   }
   // each variant gets its own background: the light gradient (when the theme has one), and a veil in its own colour
   if (variants && t?.variants) {

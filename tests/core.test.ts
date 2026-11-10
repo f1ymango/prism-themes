@@ -62,7 +62,7 @@ test('C8: our manifest entries go in and come out without touching another exten
   expect(withoutOurs(withOurs(undefined, '0.1.0'))).toBe(undefined)
   expect(withOurs(undefined, '0.1.0').content_scripts?.[0]?.matches).toEqual(['https://claude.ai/*'])
   expect(withOurs(undefined, '0.1.0').web_accessible_resources?.[0]?.resources)
-    .toEqual(['prism-theme.json', 'events/*.json', 'prism-assets/*'])
+    .toEqual(['prism-theme.json', 'prism-health.json', 'events/*.json', 'prism-assets/*'])
   expect(gradientSvg({ kind: 'gradient', angle: 90, stops: ['#000000', '#ffffff'] }).startsWith('<svg')).toBe(true)
 })
 

@@ -60,7 +60,8 @@ test('the commands: /prism set lists and changes, the shortcuts still work, rese
   on('store.set', (_, e) => { stored.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_, e) => { stored.delete(e.key); return { value: undefined } })
   for (const n of ['env.get', 'ui.log', 'ui.status', 'ui.toast']) on(n as 'env.get', () => ({ value: undefined }))
-  on('ui.backdrop', () => ({ value: { isDrawn: false, reason: 'none' } }))
+  on('theme.set', () => ({ value: { isDrawn: false, reason: 'none' } }))
+  on('theme.clear', () => ({ value: { isDrawn: false, reason: 'none' } }))
   on('command.register', () => ({ value: { command: 'prism' } }))
   const run = async (args: string) => ((await $.command.run({ command: 'prism', args })) as { text?: string }).text ?? ''
 

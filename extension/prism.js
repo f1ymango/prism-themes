@@ -1,7 +1,8 @@
 // Prism Themes content script (tier 2). Loaded by Claude Desktop from the React DevTools slot when REACT_PROFILE=1.
 // It only applies data the mod wrote: prism-theme.json ({} for Claude's own look) and events/<session>.json.
 // Attributes it owns on <html>: data-tfc-theme, data-tfc-mode, data-tfc-roles, data-tfc-missing, data-tfc-wall,
-// data-tfc-bg, data-tfc-event, data-tfc-tool, data-tfc-state, data-tfc-panels; on the app's own elements, only its own markers
+// data-tfc-bg, data-tfc-event, data-tfc-tool, data-tfc-state, data-tfc-panels; its own #prism-notice when something broke
+// (prism-health.json); on the app's own elements, only its own markers
 // data-tfc-panel and data-tfc-clear (never an attribute the app uses). It also sets data-mode to the theme's mode while a theme is on,
 // and puts the app's own value back afterwards.
 (() => {
@@ -297,6 +298,61 @@
     } catch { /* no events yet for this session */ }
   };
 
+  // Breakage notice. An update can break Prism while the last theme stays on screen, so nothing looks wrong until a
+  // change fails. Two sources: prism-health.json, which the mod writes when a part of it fails, and this page's own
+  // check that the prompt box is still found. Dismissed per message, for this window's lifetime.
+  let healthProblems = [], composerLostAt = 0, noticeKey = '', dismissed = '';
+  const noticeText = () => {
+    if (healthProblems.length) {
+      return `Prism stopped working after an update: ${healthProblems.join(', ')}. The theme on screen may stay, ` +
+        'but changes won\'t apply. Run /prism doctor in Claude Code.';
+    }
+    if (composerLostAt && Date.now() - composerLostAt > 10000) {
+      return 'Prism can\'t find Claude\'s prompt box. Claude Desktop probably changed its layout, so parts of the theme ' +
+        'may be missing. Run /prism doctor, and check for a newer Prism.';
+    }
+    return '';
+  };
+  const showNotice = () => {
+    const text = noticeText();
+    const key = text && text.slice(0, 120);
+    let el = document.getElementById('prism-notice');
+    if (!text || key === dismissed) { el?.remove(); noticeKey = ''; return; }
+    if (el && key === noticeKey) return;
+    noticeKey = key;
+    el?.remove();
+    el = document.createElement('div');
+    el.id = 'prism-notice';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:2147483646;' +
+      'max-width:min(560px,calc(100vw - 32px));display:flex;gap:10px;align-items:flex-start;padding:9px 12px;' +
+      'border-radius:8px;border:1px solid #e5484d;background:rgba(24,24,27,.94);color:#f4f4f5;' +
+      'font:12px/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35);text-shadow:none';
+    const msg = document.createElement('span');
+    msg.textContent = text;
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.style.cssText = 'all:unset;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;color:#a1a1aa';
+    close.onclick = () => { dismissed = key; showNotice(); };
+    el.append(msg, close);
+    document.body.append(el);
+  };
+  const tickHealth = async () => {
+    if (document.hidden) return;
+    try {
+      const h = await fetch(url('prism-health.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null));
+      healthProblems = h && h.v === 1 && Array.isArray(h.problems)
+        ? h.problems.map(p => (p && typeof p.name === 'string' ? p.name.slice(0, 80) : '')).filter(Boolean).slice(0, 6)
+        : [];
+    } catch { healthProblems = []; } // no file: nothing reported
+    // only on a conversation page, where the prompt box always is, and only while a theme is on
+    const onChat = /\/epitaxy\/local_/.test(location.pathname);
+    const lost = !!theme && onChat && !!theme.roles?.composer && !lastResolved.composer;
+    composerLostAt = lost ? composerLostAt || Date.now() : 0;
+    showNotice();
+  };
+
   let queued = false;
   new MutationObserver(() => {
     if (queued) return;
@@ -307,4 +363,5 @@
   tickTheme();
   setInterval(tickTheme, 1000);
   setInterval(tickEvent, 400);
+  setInterval(tickHealth, 3000);
 })();

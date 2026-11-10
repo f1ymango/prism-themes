@@ -1,5 +1,8 @@
-/** What the last `$.ui.backdrop` call for a theme with a background answered. */
+/** What the last `$.theme.set` call for a theme with a background answered. */
 export type Tier1 = { isDrawn: boolean; reason?: string }
+
+/** A part of Prism that failed (core/health.ts). */
+export type Health = { part: string; level: 'error' | 'note'; detail: string }
 
 /** The extension's state, inferred by the mod (the page cannot report back). */
 export type Tier2 = { state: 'unsupported' | 'missing' | 'restart' | 'active'; slot?: string }
@@ -38,6 +41,7 @@ declare module 'claude-code' {
       custom: Custom | null
       panels: 'glass' | 'clear' | 'solid'
       libraryInfo: LibraryInfo | null
+      health: Health[]
     }
   }
 }

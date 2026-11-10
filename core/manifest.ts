@@ -4,10 +4,12 @@
 export const OUR_JS = 'prism.js'
 export const OUR_PAYLOAD = 'prism-theme.json'
 export const OUR_RECORD = 'prism-install.json'
-export const OUR_FILES = [OUR_JS, OUR_PAYLOAD, OUR_RECORD]
+/** What the mod reports when a part of Prism stops working (core/health.ts), for the page's notice. */
+export const OUR_HEALTH = 'prism-health.json'
+export const OUR_FILES = [OUR_JS, OUR_PAYLOAD, OUR_RECORD, OUR_HEALTH]
 /** Folders of ours in the slot: per-session event files (C5) and copied backgrounds (C3). */
 export const OUR_DIRS = ['events', 'prism-assets']
-const OUR_WAR = [OUR_PAYLOAD, 'events/*.json', 'prism-assets/*']
+const OUR_WAR = [OUR_PAYLOAD, OUR_HEALTH, 'events/*.json', 'prism-assets/*']
 
 type Script = { matches?: string[]; js?: string[]; run_at?: string; [k: string]: unknown }
 type Resources = { resources?: string[]; matches?: string[]; [k: string]: unknown }

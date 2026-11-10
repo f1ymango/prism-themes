@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Discovery } from '../core/discover'
+import { alertText, describeError, doctorLines, healthFile, partName, record, settle, stripText } from '../core/health'
+import type { HealthLevel, HealthProblem } from '../core/health'
 import type { CustomBackground } from '../core/media'
 import { gradientSvg, resolve } from '../core/resolve'
 import type { Panels, Theme } from '../core/resolve'
@@ -12,7 +14,7 @@ import { THEMES } from '../core/themes'
 import type { Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
   discover, ensureAssets, importV1, inspectBackground, install, loadLibrary, nextPulseN, providerFor, readPayloadId,
-  removeEvent, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent, writePayload,
+  removeEvent, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent, writeHealth, writePayload,
 } from './host'
 import type { Library, PulseKind, SessionEvent, SessionState } from './host'
 
@@ -26,6 +28,15 @@ const found = atom({ plugin: 'prism-themes', key: 'found' } as const, null as Fo
 const custom = atom({ plugin: 'prism-themes', key: 'custom' } as const, null as Custom | null)
 const panels = atom({ plugin: 'prism-themes', key: 'panels' } as const, 'glass' as Panels)
 const libraryInfo = atom({ plugin: 'prism-themes', key: 'libraryInfo' } as const, null as LibraryInfo | null)
+const health = atom({ plugin: 'prism-themes', key: 'health' } as const, [] as HealthProblem[])
+
+/** Parts of Prism that failed in this session (core/health.ts); a part leaves the list once it works again. */
+const problems: HealthProblem[] = []
+/** The Claude Code version this session runs on, and the last one Prism started on with no errors. */
+let engineVersion: string | undefined
+let lastGood: string | undefined
+/** Whether this module load set the session's backdrop, so a switch away clears only Prism's own. */
+let backdropSet = false
 
 let discovery: Discovery = { evidence: [] }
 let event: SessionEvent = { pulse: null, state: 'idle', stateAt: 0 }
@@ -33,7 +44,9 @@ let library: Library = { themes: [], problems: [], rules: [], ruleErrors: [] }
 let cwd = ''
 /** set once the person picks a theme in this session: rules stop choosing for it */
 let manual = false
-let ruleTimer: (() => void) | undefined
+let ruleTimer: unknown
+/** Stops a $.clock timer: a Timer with cancel() now; a stop function before Claude Code 2.1.321. */
+const stopTimer = (t: unknown) => { if (typeof t === 'function') t(); else (t as { cancel?: () => void } | undefined)?.cancel?.() }
 const mediaCache = new Map<string, { key: string; bg?: CustomBackground; error?: string }>()
 
 const allThemes = (): Theme[] => [...THEMES.map(t => ({ ...t, source: 'builtin' as const })), ...library.themes]
@@ -41,6 +54,33 @@ const themeById = (id: string | undefined) => allThemes().find(t => t.id === id)
 
 const tier2Ready = (t: Tier2 | null): t is Tier2 & { slot: string } =>
   !!t?.slot && (t.state === 'restart' || t.state === 'active')
+
+/** Tells the strip and the page what is broken. Never fails. */
+async function publishHealth($: EngineInterface) {
+  try {
+    await update($, health, () => [...problems])
+    const slot = slotOf(discovery)
+    if (slot && tier2Ready(await read($, tier2))) {
+      await writeHealth($, slot, healthFile(problems, await $.clock.now(), engineVersion, lastGood))
+    }
+  } catch { /* the report itself must never break anything */ }
+}
+
+/** Runs one part of Prism. A failure is recorded under the part's name (and logged) instead of stopping the rest. */
+async function guard<T>($: EngineInterface, part: string, work: () => Promise<T>, level: HealthLevel = 'error'): Promise<T | undefined> {
+  try {
+    const out = await work()
+    if (settle(problems, part)) await publishHealth($)
+    return out
+  } catch (err) {
+    const detail = describeError(err)
+    $.ui.log(`prism-themes: ${partName(part)} failed: ${detail}`)
+    if (record(problems, { part, level, detail })) await publishHealth($)
+    return undefined
+  }
+}
+
+const failure = (part: string) => problems.find(p => p.part === part)?.detail ?? 'unknown error'
 
 async function refresh($: EngineInterface) {
   discovery = await discover($)
@@ -147,11 +187,18 @@ async function applyTheme($: EngineInterface, id: string) {
   const t = themeById(id)
   await update($, current, () => (t ? t.id : 'claude'))
   await $.store.set('current', t ? t.id : 'claude')
+  // The official backdrop ($.theme.set from Claude Code 2.1.321; $.ui.backdrop before). Optional: when it fails or
+  // nothing draws it, the extension draws the background, so a failure here is a note, not an error.
   if (t?.background && !(await loadCustom($))) {
-    const res = await $.ui.backdrop({ id: t.id, glass: { blur: 14, opacity: 0.55, tint: t.palette.bg } })
-    await update($, tier1, () => (res.isDrawn ? { isDrawn: true } : { isDrawn: false, reason: res.reason }))
-  } else {
-    await $.ui.backdrop(undefined)
+    const res = await guard($, 'backdrop',
+      () => $.theme.set({ backdrop: { id: t.id, glass: { blur: 14, opacity: 0.55, tint: t.palette.bg } } }), 'note')
+    if (res) backdropSet = true
+    await update($, tier1, () => (!res ? { isDrawn: false, reason: `this Claude Code could not set one: ${failure('backdrop')}` }
+      : res.isDrawn ? { isDrawn: true } : { isDrawn: false, reason: res.reason }))
+  } else if (backdropSet) {
+    // only a backdrop Prism set: $.theme.clear would also wipe another plugin's
+    await guard($, 'backdrop', () => $.theme.clear(), 'note')
+    backdropSet = false
   }
   const t2 = await read($, tier2)
   if (tier2Ready(t2)) await writePayload($, t2.slot, await payloadFor($, t ? t.id : 'claude', t2.slot))
@@ -162,9 +209,11 @@ async function applyTheme($: EngineInterface, id: string) {
 
 async function pickTheme($: EngineInterface, id: string) {
   manual = true
-  await applyTheme($, id)
   const t = themeById(id)
-  $.ui.toast(t ? `Theme: ${t.name}` : "Claude's own look")
+  const name = t ? t.name : "Claude's own look"
+  const ok = await guard($, 'apply', async () => { await applyTheme($, id); return true })
+  $.ui.toast(ok ? (t ? `Theme: ${name}` : name)
+    : `Prism couldn't switch to ${name}: ${failure('apply')}. The page may still show the old theme. /prism doctor`)
 }
 
 /** Rules choose the theme until the person picks one in this session; time rules are checked each minute. */
@@ -172,7 +221,9 @@ async function followRules($: EngineInterface) {
   if (manual) return
   const rule = pickRule(library.rules, { cwd, minutes: await localMinutes($) })
   await update($, libraryInfo, i => (i ? { ...i, ruleUse: rule?.use } : i))
-  if (rule && rule.use !== (await read($, current)) && (rule.use === 'claude' || themeById(rule.use))) await applyTheme($, rule.use)
+  if (rule && rule.use !== (await read($, current)) && (rule.use === 'claude' || themeById(rule.use))) {
+    await guard($, 'apply', () => applyTheme($, rule.use))
+  }
 }
 
 async function runBusy($: EngineInterface, work: () => Promise<void>) {
@@ -187,32 +238,43 @@ async function runBusy($: EngineInterface, work: () => Promise<void>) {
 
 async function onInstall($: EngineInterface) {
   await runBusy($, async () => {
-    await refresh($)
-    const out = await install($, discovery, {})
-    $.ui.toast(out.message)
-    await refresh($)
-    if (out.ok) await applyTheme($, await read($, current)) // write the real payload now that the slot is ours
+    const done = await guard($, 'install', async () => {
+      await refresh($)
+      const out = await install($, discovery, {})
+      $.ui.toast(out.message)
+      await refresh($)
+      if (out.ok) await applyTheme($, await read($, current)) // write the real payload now that the slot is ours
+      return true
+    })
+    if (!done) $.ui.toast(`Prism couldn't install the extension: ${failure('install')}. /prism doctor`)
   })
 }
 
 async function onRemove($: EngineInterface) {
   await runBusy($, async () => {
-    await refresh($)
-    const out = await uninstall($, discovery)
-    $.ui.toast(out.message)
-    await refresh($)
+    const done = await guard($, 'install', async () => {
+      await refresh($)
+      const out = await uninstall($, discovery)
+      $.ui.toast(out.message)
+      await refresh($)
+      return true
+    })
+    if (!done) $.ui.toast(`Prism couldn't remove the extension: ${failure('install')}. /prism doctor`)
   })
 }
 
 /** /prism doctor: everything the mod knows, in one place (C9). */
 async function doctor($: EngineInterface): Promise<string> {
-  await refresh($)
-  const rule = await reloadLibrary($)
+  await guard($, 'discover', () => refresh($))
+  const rule = await guard($, 'library', () => reloadLibrary($))
   const t1 = await read($, tier1)
   const t2 = await read($, tier2)
   const bg = await loadCustom($)
   const lines = [
     `Prism ${VERSION} — theme: ${(await read($, current))}${manual ? ' (picked in this session)' : rule ? ` (rule → ${rule.use})` : ''}`,
+    '',
+    'Health',
+    ...doctorLines(problems, engineVersion, lastGood),
     '',
     'Claude Desktop',
     ...discovery.evidence.map(e => `  ${e}`),
@@ -349,7 +411,7 @@ function signal($: EngineInterface, kind: PulseKind | '', tool: string, now: Ses
       stateAt: now === event.state ? event.stateAt : at,
     }
     const t2 = await read($, tier2)
-    if (tier2Ready(t2)) await writeEvent($, t2.slot, event)
+    if (tier2Ready(t2)) await guard($, 'events', () => writeEvent($, t2.slot, event), 'note')
     if (kind) {
       const text = statusOf(themeById(await read($, current)), kind, tool)
       if (text) $.ui.status(text)
@@ -380,25 +442,39 @@ export const register: Register = on => {
     const out = await next(e)
     cwd = e.cwd
     manual = false
-    await $.command.register({ name: 'prism', description: 'Prism themes: pick a theme, /prism bg <file|folder>, /prism doctor' })
-    try {
-      const t2 = await refresh($)
-      if (await syncInstall($, discovery)) $.ui.toast('Prism\'s extension was updated. Restart Claude Desktop to load it.')
-      await sweepEvents($, discovery).catch(() => undefined)
-      await showCustom($, await loadCustom($))
-      const rule = await reloadLibrary($)
-      const saved = rule?.use ?? (await readPayloadId($, t2.slot)) ?? (await $.store.get('current'))
-      await applyTheme($, typeof saved === 'string' ? saved : 'claude')
-      ruleTimer?.()
-      ruleTimer = library.rules.some(r => r.time) ? $.clock.every(60000, () => void followRules($).catch(() => undefined)) : undefined
-    } catch (err) {
-      $.ui.log(`prism-themes: start failed: ${String(err)}`)
+    await guard($, 'commands', () => $.command.register({ name: 'prism', description: 'Prism themes: pick a theme, /prism bg <file|folder>, /prism doctor' }))
+    // Each part runs on its own: one that an update broke is reported, and the rest still start.
+    engineVersion = (await guard($, 'version', () => $.session.version(), 'note'))?.version
+    const stored = await $.store.get('lastGood').catch(() => undefined)
+    lastGood = typeof stored === 'string' ? stored : undefined
+    const t2 = await guard($, 'discover', () => refresh($))
+    if (t2 && (await guard($, 'extension', () => syncInstall($, discovery)))) {
+      $.ui.toast('Prism\'s extension was updated. Restart Claude Desktop to load it.')
     }
+    await sweepEvents($, discovery).catch(() => undefined)
+    const rule = await guard($, 'library', async () => {
+      await showCustom($, await loadCustom($))
+      return reloadLibrary($)
+    })
+    const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
+    await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
+    stopTimer(ruleTimer)
+    ruleTimer = library.rules.some(r => r.time) ? $.clock.every(60000, () => void followRules($).catch(() => undefined)) : undefined
+    // Like the Codex port's build check: remember the version Prism last started on cleanly, and say so when an
+    // update is the likely cause.
+    const alert = alertText(problems, engineVersion, lastGood)
+    if (alert) {
+      $.ui.toast(alert)
+    } else if (engineVersion && engineVersion !== lastGood) {
+      await $.store.set('lastGood', engineVersion).catch(() => undefined)
+      lastGood = engineVersion
+    }
+    await publishHealth($)
     return out
   })
 
   on('session.end', async ($, e, next) => {
-    ruleTimer?.()
+    stopTimer(ruleTimer)
     await removeEvent($, discovery).catch(() => undefined)
     return next(e)
   })
@@ -454,6 +530,7 @@ export const register: Register = on => {
     const c = await read($, custom)
     const lib = await read($, libraryInfo)
     const busy = await read($, isBusy)
+    const broken = stripText(await read($, health))
     const worn = themeById(now)
     const st = t2?.state ?? 'unsupported'
     const needs = (c || worn?.background || worn?.media) && !t1?.isDrawn && st !== 'active'
@@ -488,6 +565,7 @@ export const register: Register = on => {
           </Box>
         </Box>
         <Box flexDirection="column">
+          {broken ? <Text color="error">{broken}</Text> : null}
           <Text dimColor>{`Backdrop (official API): ${c || worn?.media
             ? 'not used: picture and video backgrounds are drawn by the extension'
             : tier1Text(t1)}`}</Text>

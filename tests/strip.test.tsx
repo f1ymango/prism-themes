@@ -4,7 +4,9 @@ const STRIP = { plugin: 'prism-themes', component: 'AbovePrompt', props: { hasSu
 
 test('the strip reports a missing backdrop layer and offers the extension, on every surface', async ($, on) => {
   on('command.register', () => ({ value: { command: 'prism' } }))
-  on('ui.backdrop', () => ({
+  on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
+  on('theme.clear', () => ({ value: { isDrawn: false, reason: 'cleared' } }))
+  on('theme.set', () => ({
     value: { isDrawn: false, reason: 'no attached desktop client says it draws backdrops (a desktop app with the backdrop layer does, on its ui_attach)' },
   }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))

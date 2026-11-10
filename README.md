@@ -12,7 +12,8 @@ A community mod, not made or endorsed by Anthropic or OpenAI. The Claude integra
 the app through its React DevTools extension slot it builds on.
 
 > **Unofficial.** Both integrations use app internals that can change after an update. The Codex integration checks
-> unfamiliar builds in an isolated profile; Claude Desktop's `/prism doctor` reports which drawing paths still work.
+> unfamiliar builds in an isolated profile; on Claude Desktop, Prism tells you when an update breaks part of it (see
+> [When an update breaks something](#when-an-update-breaks-something)).
 
 ## Claude Desktop demos
 
@@ -75,7 +76,7 @@ Then, in a Code session in Claude Desktop:
 
 | | Official backdrop | Extension (optional) |
 | --- | --- | --- |
-| How | Claude Desktop's own `$.ui.backdrop` mod API | a content script in the app's React DevTools extension slot, loaded when `REACT_PROFILE=1` |
+| How | Claude Code's own `$.theme.set` mod API (`$.ui.backdrop` before 2.1.321) | a content script in the app's React DevTools extension slot, loaded when `REACT_PROFILE=1` |
 | What | gradient backgrounds, frosted panels | colours, fonts, corners, reactions; picture, slideshow, SVG and video backgrounds |
 | Needs | an app version that draws backdrops | one install and a restart |
 
@@ -94,7 +95,7 @@ Prism uses the official API where the app supports it and the extension elsewher
 | `/prism reset <key>`, `/prism reset all` | back to the defaults |
 | `/prism reload` | re-read your themes folder |
 | `/prism import <folder>` | import themes made for claude-desktop-themes |
-| `/prism doctor` | what Prism found: the app's data folder, both drawing paths, your themes and their problems, the rule in force |
+| `/prism doctor` | what Prism found: what is broken and since which Claude Code version, the app's data folder, both drawing paths, your themes and their problems, the rule in force |
 
 Files are judged by their content, not their name, with size limits of 15 MB per picture, 2 MB per SVG and 50 MB
 per video.
@@ -151,6 +152,24 @@ The full format, with stylesheets and the attributes they can react to, is in
 
 Secondary and muted text always keep a WCAG AA contrast (4.5:1) against the theme's background, whatever the palette.
 
+## When an update breaks something
+
+Claude Code and Claude Desktop update often, and Prism leans on parts of both that can change. After an update the
+theme already on screen usually stays, because the page keeps the last one it was given. So a break used to show
+only when switching themes quietly did nothing. Now:
+
+- Each part of Prism (finding the app, reading your themes, applying a theme, the extension, reactions) runs on its
+  own. A part that fails is recorded under its name, and the rest still start.
+- When a part fails, a toast says which one. If Claude Code was updated since Prism last started without errors, the
+  toast says that too, with both version numbers.
+- The `/prism` strip shows a red **Not working** line, and `/prism doctor` has a **Health** section with the error
+  itself.
+- With the extension installed, a small notice also appears at the bottom of the window, even when the mod could not
+  apply anything. The page also warns on its own when it can no longer find Claude's prompt box, which means Claude
+  Desktop changed its layout.
+- A failure that has a fallback is listed in the doctor as a note and raises no alert. The official backdrop is one:
+  when it fails, the extension draws the background instead.
+
 ## Remove
 
 Press **Remove extension** in `/prism`, then restart Claude Desktop. This undoes exactly what the install did: its
@@ -170,6 +189,7 @@ prism-themes`). Your themes folder stays.
 - The Terminal and Browser panes keep their own backgrounds: the terminal paints on a canvas, and the browser pane
   is a separate web page.
 - The official backdrop API is not drawn by every app version; until it is, backgrounds need the extension.
+- If an update stops the mod from loading at all, Prism cannot report it: Claude Code lists the plugin error itself.
 - Windows and macOS only.
 
 ## Development

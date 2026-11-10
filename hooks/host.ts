@@ -3,7 +3,8 @@ import type { EngineInterface } from 'claude-code'
 
 import { SLOT_ID, fromProcesses, join, markerTarget, parseMacProcs, parseWinProcs, pick } from '../core/discover'
 import type { Candidate, Discovery, OS } from '../core/discover'
-import { OUR_DIRS, OUR_FILES, OUR_JS, OUR_PAYLOAD, OUR_RECORD, hasOurs, parseRecord, withOurs, withoutOurs } from '../core/manifest'
+import type { HealthFile } from '../core/health'
+import { OUR_DIRS, OUR_FILES, OUR_HEALTH, OUR_JS, OUR_PAYLOAD, OUR_RECORD, hasOurs, parseRecord, withOurs, withoutOurs } from '../core/manifest'
 import type { InstallRecord, Manifest } from '../core/manifest'
 import { MAX_SLIDES, assetName, providerFor, refusal, sniff } from '../core/media'
 import type { Checked, CustomBackground } from '../core/media'
@@ -12,7 +13,7 @@ import type { Payload, Theme } from '../core/resolve'
 import { convertV1Css, finalize, fromV1, parseRules, parseTheme } from '../core/schema'
 import type { Draft, Rule } from '../core/schema'
 
-export const VERSION = '0.5.0'
+export const VERSION = '0.6.0'
 export type Tier2State = 'unsupported' | 'missing' | 'restart' | 'active'
 export type Tier2 = { state: Tier2State; slot?: string }
 
@@ -77,7 +78,7 @@ export async function discover($: EngineInterface): Promise<Discovery> {
     }
     const packages = local && join(local, 'Packages')
     if (packages && (await $.fs.exists(packages))) {
-      for (const p of (await $.fs.list(packages)).filter(e => e.kind === 'directory' && e.name.startsWith('Claude_')))
+      for (const p of (await $.fs.list(packages)).filter(e => e.kind === 'dir' && e.name.startsWith('Claude_')))
         cands.push(await candidate($, join(packages, p.name, 'LocalCache', 'Roaming', 'Claude'), 'msix'))
     }
   } else {
@@ -127,6 +128,15 @@ export async function readPayloadId($: EngineInterface, slot: string | undefined
 
 export async function writePayload($: EngineInterface, slot: string, payload: Payload | Record<string, never>) {
   await $.fs.write(join(slot, OUR_PAYLOAD), JSON.stringify(payload))
+}
+
+/** What is broken, for the page's notice; written only when it changes. */
+export async function writeHealth($: EngineInterface, slot: string, health: HealthFile) {
+  const path = join(slot, OUR_HEALTH)
+  const text = JSON.stringify(health)
+  const old = await readJson<HealthFile>($, path)
+  if (old && JSON.stringify(old.problems) === JSON.stringify(health.problems) && old.version === health.version) return
+  await $.fs.write(path, text)
 }
 
 async function userEnvIsSet($: EngineInterface, os: OS) {
