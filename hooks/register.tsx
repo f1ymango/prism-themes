@@ -14,7 +14,8 @@ import { THEMES } from '../core/themes'
 import type { Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
   discover, ensureAssets, importV1, inspectBackground, install, loadLibrary, nextPulseN, providerFor, readPayloadId,
-  removeEvent, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent, writeHealth, writePayload,
+  listRemoved, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
+  writeHealth, writePayload,
 } from './host'
 import type { Library, PulseKind, SessionEvent, SessionState } from './host'
 
@@ -384,13 +385,43 @@ async function setting($: EngineInterface, args: string): Promise<string> {
       await reloadLibrary($)
       return out.join('\n')
     }
+    case 'remove':
+    case 'delete': {
+      if (!value) return 'Usage: /prism remove <id> — moves one of your themes out of the themes folder (/prism restore <id> brings it back)'
+      if (!discovery.os) await refresh($)
+      if (!discovery.os) return 'Removing themes needs Windows or macOS.'
+      const id = value.toLowerCase()
+      const out = await removeTheme($, discovery.os, id, THEMES.map(t => t.id))
+      if (!out.ok) return out.message
+      await reloadLibrary($)
+      // the theme in force is gone: back to what the rules say, else Claude's own look
+      if ((await read($, current)) === id) {
+        const rule = pickRule(library.rules, { cwd, minutes: await localMinutes($) })
+        await applyTheme($, rule && themeById(rule.use) ? rule.use : 'claude')
+      }
+      const ruled = library.rules.some(r => r.use === id) ? ' rules.json still names it; those rules are skipped until you change them.' : ''
+      return out.message + ruled
+    }
+    case 'restore': {
+      const removed = await listRemoved($)
+      if (!value) {
+        return removed.length
+          ? ['Removed themes (/prism restore <id>):', ...removed.map(r => `  ${r.id}  (${r.folder})`)].join('\n')
+          : 'No removed themes.'
+      }
+      if (!discovery.os) await refresh($)
+      if (!discovery.os) return 'Restoring themes needs Windows or macOS.'
+      const out = await restoreTheme($, discovery.os, value.toLowerCase())
+      if (out.ok) await reloadLibrary($)
+      return out.message
+    }
     case 'doctor':
       return doctor($)
     default:
       // the short commands that came first: /prism glass 0.3 is /prism set panels.tint 0.3
       if (ALIASES[word.toLowerCase()]) return changeSetting($, word, value)
       return `Unknown: ${word}. Try /prism, /prism use <id>, /prism bg <file|folder>, /prism bg off, /prism set (every adjustable ` +
-        'part: panels, composer, background, text halo, reactions), /prism reset <key|all>, /prism import <folder>, /prism reload, /prism doctor'
+        'part: panels, composer, background, text halo, reactions), /prism reset <key|all>, /prism remove <id>, /prism restore <id>, /prism import <folder>, /prism reload, /prism doctor'
   }
   if (next) await $.store.set('background', next)
   else await $.store.delete('background')
@@ -579,7 +610,9 @@ export const register: Register = on => {
         </Box>
         {row('Built-in', [{ id: 'claude', name: 'Claude' }, ...THEMES])}
         {row(`Yours (${lib?.dir ? `${lib.dir}\\themes` : 'no folder'})`, lib?.themes.length ? lib.themes : [])}
-        {lib?.themes.length ? null : <Text dimColor>{'  None yet. Ask Claude to "make me a theme", or /prism import <folder of v1 themes>.'}</Text>}
+        {lib?.themes.length
+          ? <Text dimColor>{'  /prism remove <id> removes one of yours (/prism restore <id> brings it back).'}</Text>
+          : <Text dimColor>{'  None yet. Ask Claude to "make me a theme", or /prism import <folder of v1 themes>.'}</Text>}
       </Box>
     )
   })

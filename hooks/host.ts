@@ -11,9 +11,11 @@ import type { Checked, CustomBackground } from '../core/media'
 import { safeCss } from '../core/resolve'
 import type { Payload, Theme } from '../core/resolve'
 import { convertV1Css, finalize, fromV1, parseRules, parseTheme } from '../core/schema'
+import { infoOf, planRemove, removedEntries, removedName } from '../core/removal'
+import type { ThemeFileInfo } from '../core/removal'
 import type { Draft, Rule } from '../core/schema'
 
-export const VERSION = '0.6.0'
+export const VERSION = '0.7.0'
 export type Tier2State = 'unsupported' | 'missing' | 'restart' | 'active'
 export type Tier2 = { state: Tier2State; slot?: string }
 
@@ -480,4 +482,81 @@ export async function uninstall($: EngineInterface, d: Discovery): Promise<Outco
   return code === 0
     ? { ok: true, message: 'Extension removed. Restart Claude Desktop to finish.' }
     : { ok: false, message: `Some files could not be removed. Check ${slot}` }
+}
+
+// /prism remove and /prism restore ------------------------------------------------------------------------------
+
+async function themeInfos($: EngineInterface, dir: string): Promise<ThemeFileInfo[]> {
+  if (!(await $.fs.exists(dir))) return []
+  const out: ThemeFileInfo[] = []
+  for (const e of (await $.fs.list(dir)).filter(x => x.kind === 'file' && x.name.endsWith('.json'))) {
+    let raw: unknown
+    try { raw = JSON.parse(await readText($, join(dir, e.name))) } catch { raw = undefined }
+    out.push(infoOf(e.name, raw))
+  }
+  return out
+}
+
+/** Moves one of your themes (its file and its own stylesheet) to removed/<id>~<time>. Built-ins stay. */
+export async function removeTheme($: EngineInterface, os: OS, id: string, builtinIds: string[]): Promise<Outcome> {
+  const home = await prismHome($)
+  if (!home) return { ok: false, message: 'No home folder: Prism keeps no themes of yours here.' }
+  const dir = join(home, 'themes')
+  const plan = planRemove(await themeInfos($, dir), id, builtinIds)
+  if ('error' in plan) return { ok: false, message: plan.error }
+  const folder = removedName(id, new Date(await $.clock.now()))
+  const into = join(home, 'removed', folder)
+  const moving = [plan.json, ...(plan.css ? [plan.css] : [])]
+  // copy first, check, then delete: a failure on the way leaves the theme where it was
+  for (const name of moving) {
+    const from = join(dir, name)
+    if (!(await $.fs.exists(from))) continue
+    const text = await readText($, from)
+    await $.fs.write(join(into, name), text)
+    if ((await readText($, join(into, name))) !== text) throw new Error(`could not copy ${name} into ${into}`)
+  }
+  const gone = [plan.json, ...(plan.css && !plan.keepCss ? [plan.css] : [])].map(n => join(dir, n))
+  if ((await removePaths($, os, gone)) !== 0 || (await $.fs.exists(gone[0]!))) {
+    return { ok: false, message: `Copied to ${into}, but ${plan.json} could not be deleted from ${dir}.` }
+  }
+  const notes = [
+    plan.keepCss ? `${plan.css} stays, since another theme uses it too` : '',
+    plan.media ? `its background ${plan.media} stays in the themes folder` : '',
+  ].filter(Boolean)
+  return {
+    ok: true,
+    message: `Removed ${id}: moved to ${into}.${notes.length ? ` (${notes.join('; ')}.)` : ''} ` +
+      `/prism restore ${id} brings it back; delete that folder to remove it for good.`,
+  }
+}
+
+/** Your removed themes, newest first. */
+export async function listRemoved($: EngineInterface): Promise<{ id: string; folder: string }[]> {
+  const home = await prismHome($)
+  const dir = home && join(home, 'removed')
+  if (!dir || !(await $.fs.exists(dir))) return []
+  return removedEntries((await $.fs.list(dir)).filter(e => e.kind === 'dir').map(e => e.name))
+}
+
+/** Moves the newest removal of `id` back into the themes folder, unless a theme there has taken its place. */
+export async function restoreTheme($: EngineInterface, os: OS, id: string): Promise<Outcome> {
+  const home = await prismHome($)
+  if (!home) return { ok: false, message: 'No home folder: Prism keeps no themes of yours here.' }
+  const entry = (await listRemoved($)).find(e => e.id === id)
+  if (!entry) return { ok: false, message: `No removed theme "${id}". /prism restore lists them.` }
+  const from = join(home, 'removed', entry.folder)
+  const dir = join(home, 'themes')
+  const files = (await $.fs.list(from)).filter(e => e.kind === 'file').map(e => e.name)
+  const taken = files.filter(n => n.endsWith('.json')).length && (await themeInfos($, dir)).some(f => f.id === id)
+  if (taken) return { ok: false, message: `A theme with the id "${id}" is in your themes folder again. Remove or rename it first.` }
+  for (const name of files) {
+    const target = join(dir, name)
+    if (await $.fs.exists(target)) {
+      if (name.endsWith('.json')) return { ok: false, message: `${target} already exists. Move it away first.` }
+      continue // a stylesheet another theme kept: the one in place stays
+    }
+    await $.fs.write(target, await readText($, join(from, name)))
+  }
+  await removeDir($, os, from, true)
+  return { ok: true, message: `Restored ${id} into ${dir}.` }
 }

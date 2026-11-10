@@ -93,6 +93,8 @@ Prism uses the official API where the app supports it and the extension elsewher
 | `/prism set` | list every adjustable part, its value and its range (see below) |
 | `/prism set <key> <value>` | change one, e.g. `/prism set panels.blur 0` |
 | `/prism reset <key>`, `/prism reset all` | back to the defaults |
+| `/prism remove <id>` | remove one of your themes: its file and its own stylesheet move to `prism-themes\removed\` |
+| `/prism restore`, `/prism restore <id>` | list removed themes, or bring one back |
 | `/prism reload` | re-read your themes folder |
 | `/prism import <folder>` | import themes made for claude-desktop-themes |
 | `/prism doctor` | what Prism found: what is broken and since which Claude Code version, the app's data folder, both drawing paths, your themes and their problems, the rule in force |
@@ -151,6 +153,18 @@ The full format, with stylesheets and the attributes they can react to, is in
 `rules.json` that picks themes by project folder and time of day (it goes in `.claude\prism-themes\`).
 
 Secondary and muted text always keep a WCAG AA contrast (4.5:1) against the theme's background, whatever the palette.
+
+To remove a theme of yours, run `/prism remove <id>`. Nothing is deleted outright: the theme file and its stylesheet
+move to `.claude\prism-themes\removed\<id>~<date-time>\`, and `/prism restore <id>` puts them back. To remove a
+theme for good, delete that folder. A few things are refused or left alone:
+
+- Built-in themes can't be removed.
+- A theme that another theme `extends` can't be removed until that other theme is removed or changed.
+- A stylesheet that another theme also uses stays in place.
+- A background file beside the theme stays in place. A background anywhere else, such as a Wallpaper Engine folder,
+  is never touched.
+
+If the removed theme was on, Prism switches to what your rules pick, or to Claude's own look.
 
 ## When an update breaks something
 
