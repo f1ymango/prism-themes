@@ -5,6 +5,8 @@ import type { Discovery } from '../core/discover'
 import { alertText, describeError, doctorLines, healthFile, partName, record, settle, stripText } from '../core/health'
 import type { HealthLevel, HealthProblem } from '../core/health'
 import type { CustomBackground } from '../core/media'
+import { OFFICIAL_SVG_MAX, glassFor, isOlderEngine, sceneName, sceneOf, schemeFor } from '../core/official'
+import type { Glass } from '../core/official'
 import { gradientSvg, resolve } from '../core/resolve'
 import type { Panels, Theme } from '../core/resolve'
 import { pickRule } from '../core/schema'
@@ -38,6 +40,10 @@ let engineVersion: string | undefined
 let lastGood: string | undefined
 /** Whether this module load set the session's backdrop, so a switch away clears only Prism's own. */
 let backdropSet = false
+/** Which shape of the backdrop call this engine took (core/official.ts), once learnt. */
+let backdropShape: 'scene' | 'nested' | 'older' | undefined
+/** A picture background drawn as an official backdrop: its scene name and SVG source, for the Backdrop hook. */
+let officialSvg: { scene: string; source: string } | undefined
 
 let discovery: Discovery = { evidence: [] }
 let event: SessionEvent = { pulse: null, state: 'idle', stateAt: 0 }
@@ -78,6 +84,48 @@ async function guard<T>($: EngineInterface, part: string, work: () => Promise<T>
     $.ui.log(`prism-themes: ${partName(part)} failed: ${detail}`)
     if (record(problems, { part, level, detail })) await publishHealth($)
     return undefined
+  }
+}
+
+type BackdropAnswer = { isDrawn: boolean; reason?: string }
+type BackdropCalls = {
+  theme: { set: (args: unknown) => Promise<BackdropAnswer> }
+  ui: { backdrop: (args: unknown) => Promise<BackdropAnswer> }
+}
+
+/** Sets an official backdrop by whichever shape this engine takes, newest first (core/official.ts). */
+async function setOfficialBackdrop($: EngineInterface, scene: string, glass: Glass, scheme: 'light' | 'dark' | undefined): Promise<BackdropAnswer> {
+  if (!backdropShape || backdropShape === 'scene') {
+    try {
+      // scene for 2.1.323+, id beside it for the engines before (each drops the member it does not know)
+      const res = await ($ as unknown as BackdropCalls).theme.set({ backdrop: { scene, id: scene, glass }, ...(scheme ? { overrideColorScheme: scheme } : {}) })
+      if (scheme) backdropShape = 'scene'
+      return res
+    } catch (err) {
+      if (!isOlderEngine(err, 'overrideColorScheme')) throw err
+    }
+  }
+  if (!backdropShape || backdropShape === 'nested') {
+    try {
+      const res = await ($ as unknown as BackdropCalls).theme.set({ backdrop: { id: scene, glass, ...(scheme ? { colorScheme: scheme } : {}) } })
+      backdropShape = 'nested'
+      return res
+    } catch (err) {
+      if (!isOlderEngine(err)) throw err
+    }
+  }
+  const res = await ($ as unknown as BackdropCalls).ui.backdrop({ id: scene, glass })
+  backdropShape = 'older'
+  return res
+}
+
+/** Takes Prism's backdrop off by whichever call this engine has. */
+async function clearOfficialBackdrop($: EngineInterface) {
+  try {
+    await $.theme.clear()
+  } catch (err) {
+    if (!isOlderEngine(err)) throw err
+    await ($ as unknown as BackdropCalls).ui.backdrop(undefined)
   }
 }
 
@@ -170,7 +218,8 @@ async function payloadFor($: EngineInterface, id: string, slot: string) {
     haloSize: num(s, 'text.halo'),
     reactions: choice(s, 'reactions') !== 'off',
     backgroundByPage: !!t?.background && !t1?.isDrawn,
-    media: bg && files.length
+    // a picture the desktop app draws itself (the official route) is not drawn again by the page
+    media: bg && files.length && !(officialSvg && t1?.isDrawn)
       ? {
         provider: bg.provider, files,
         interval: num(s, 'background.interval') ?? bg.interval,
@@ -188,17 +237,31 @@ async function applyTheme($: EngineInterface, id: string) {
   const t = themeById(id)
   await update($, current, () => (t ? t.id : 'claude'))
   await $.store.set('current', t ? t.id : 'claude')
-  // The official backdrop ($.theme.set from Claude Code 2.1.321; $.ui.backdrop before). Optional: when it fails or
-  // nothing draws it, the extension draws the background, so a failure here is a note, not an error.
-  if (t?.background && !(await loadCustom($))) {
-    const res = await guard($, 'backdrop',
-      () => $.theme.set({ backdrop: { id: t.id, glass: { blur: 14, opacity: 0.55, tint: t.palette.bg } } }), 'note')
+  // The official route first (core/official.ts): a gradient, or a picture background that is one SVG, is drawn by the
+  // desktop app itself, with its own panel glass. Optional: when it fails or nothing draws it, the extension draws
+  // the background, so a failure here is a note, not an error.
+  const bg = (await loadCustom($)) ?? (await themeMedia($, t))
+  officialSvg = undefined
+  let scene: string | undefined
+  if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
+    const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
+    if (typeof source === 'string') {
+      scene = sceneName('svg', t?.id ?? 'claude')
+      officialSvg = { scene, source }
+    }
+  } else if (!bg && t?.background) {
+    scene = sceneName('gradient', t.id)
+  }
+  if (scene) {
+    const s = await loadSettings($)
+    const glass = glassFor(t, { panels: choice(s, 'panels.style') as Panels | undefined, panelTint: num(s, 'panels.tint'), panelBlur: num(s, 'panels.blur') })
+    const res = await guard($, 'backdrop', () => setOfficialBackdrop($, scene!, glass, schemeFor(t)), 'note')
     if (res) backdropSet = true
     await update($, tier1, () => (!res ? { isDrawn: false, reason: `this Claude Code could not set one: ${failure('backdrop')}` }
       : res.isDrawn ? { isDrawn: true } : { isDrawn: false, reason: res.reason }))
   } else if (backdropSet) {
     // only a backdrop Prism set: $.theme.clear would also wipe another plugin's
-    await guard($, 'backdrop', () => $.theme.clear(), 'note')
+    await guard($, 'backdrop', () => clearOfficialBackdrop($), 'note')
     backdropSet = false
   }
   const t2 = await read($, tier2)
@@ -544,10 +607,13 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Backdrop' }, async ($, e, next) => {
     if (e.props.plugin !== P) return next(e)
-    const t = themeById(e.props.id)
+    const scene = sceneOf(e.props as { scene?: unknown; id?: unknown })
     const els = $.ui.resolve(e)
-    if (!t?.background || !('Svg' in els)) return next(e)
+    if (!scene || !('Svg' in els)) return next(e)
     const { Svg } = els
+    if (officialSvg?.scene === scene) return <Svg source={officialSvg.source} alt="Your background" />
+    const t = allThemes().find(x => sceneName('gradient', x.id) === scene || x.id === scene)
+    if (!t?.background) return next(e)
     return <Svg source={gradientSvg(t.background)} alt={`${t.name} background`} />
   })
 
@@ -597,8 +663,8 @@ export const register: Register = on => {
         </Box>
         <Box flexDirection="column">
           {broken ? <Text color="error">{broken}</Text> : null}
-          <Text dimColor>{`Backdrop (official API): ${c || worn?.media
-            ? 'not used: picture and video backgrounds are drawn by the extension'
+          <Text dimColor>{`Backdrop (official API): ${(c || worn?.media) && !officialSvg
+            ? 'not used: picture and video backgrounds are drawn by the extension (an SVG goes the official way)'
             : tier1Text(t1)}`}</Text>
           <Text dimColor>{`Extension: ${TIER2_TEXT[st]}`}</Text>
           <Text dimColor>{`Background: ${customText(c)}`}</Text>

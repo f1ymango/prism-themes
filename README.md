@@ -76,11 +76,17 @@ Then, in a Code session in Claude Desktop:
 
 | | Official backdrop | Extension (optional) |
 | --- | --- | --- |
-| How | Claude Code's own `$.theme.set` mod API (`$.ui.backdrop` before 2.1.321) | a content script in the app's React DevTools extension slot, loaded when `REACT_PROFILE=1` |
-| What | gradient backgrounds, frosted panels | colours, fonts, corners, reactions; picture, slideshow, SVG and video backgrounds |
-| Needs | an app version that draws backdrops | one install and a restart |
+| How | Claude Code's own theme API, `$.theme.set`, the same route as Anthropic's `theme-examples` plugin | a content script in the app's React DevTools extension slot, loaded when `REACT_PROFILE=1` |
+| What | gradient backgrounds and SVG backgrounds up to 512 KB, the app's own panel glass (from `panels.style`, `panels.tint` and `panels.blur`), and the light or dark hint | colours, fonts, corners, stylesheets, reactions; picture, slideshow and video backgrounds |
+| Needs | a Claude Desktop that draws backdrops | one install and a restart |
 
-Prism uses the official API where the app supports it and the extension elsewhere, and says which in the strip.
+Prism sends everything the official route can carry through it first. The extension draws only what that route
+cannot, or what this app version does not draw yet, and the strip says which route is in use. Every shape of the
+official call so far is supported: `scene` with `overrideColorScheme` (Claude Code 2.1.323 and later), `id` with
+`colorScheme` (2.1.319 and later), and `$.ui.backdrop` (earlier).
+
+Official colours (`$.theme.set({ colors })`, Claude Code 2.1.324 and later) come next. Until then, the extension
+paints the palette.
 
 ## Commands
 
@@ -202,7 +208,7 @@ prism-themes`). Your themes folder stays.
 
 - The Terminal and Browser panes keep their own backgrounds: the terminal paints on a canvas, and the browser pane
   is a separate web page.
-- The official backdrop API is not drawn by every app version; until it is, backgrounds need the extension.
+- The official backdrop is not drawn by every Claude Desktop version; until it is, backgrounds need the extension.
 - If an update stops the mod from loading at all, Prism cannot report it: Claude Code lists the plugin error itself.
 - Windows and macOS only.
 
