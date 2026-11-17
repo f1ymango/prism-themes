@@ -3,7 +3,7 @@
 import { ID } from './schema'
 
 /** What one theme file in the themes folder says about itself. */
-export type ThemeFileInfo = { file: string; id?: string; extends?: string; css?: string; media?: string }
+export type ThemeFileInfo = { file: string; id?: string; name?: string; extends?: string; css?: string; media?: string }
 
 export type RemovePlan = { error: string } | { json: string; css?: string; keepCss: boolean; media?: string }
 
@@ -12,7 +12,22 @@ export function infoOf(file: string, raw: unknown): ThemeFileInfo {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const bg = o.background && typeof o.background === 'object' ? (o.background as Record<string, unknown>) : {}
   const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
-  return { file, id: s(o.id), extends: s(o.extends), css: s(o.css), media: s(bg.file) }
+  return { file, id: s(o.id), name: s(o.name), extends: s(o.extends), css: s(o.css), media: s(bg.file) }
+}
+
+/** What someone typed after /prism remove or restore, as an id guess: lower case, spaces turned into hyphens. */
+export const slugOf = (typed: string) => typed.trim().toLowerCase().replace(/\s+/g, '-')
+
+/**
+ * The id a typed theme reference means: an id (any case, spaces for hyphens), else the display name of exactly
+ * one of your themes, case-insensitive. Falls back to the id guess, so the error names what was looked for.
+ */
+export function idFor(files: ThemeFileInfo[], typed: string): string {
+  const guess = slugOf(typed)
+  if (files.some(f => f.id === guess)) return guess
+  const wanted = typed.trim().toLowerCase().replace(/\s+/g, ' ')
+  const named = files.filter(f => f.id && f.name?.trim().toLowerCase().replace(/\s+/g, ' ') === wanted)
+  return named.length === 1 ? named[0]!.id! : guess
 }
 
 const isRelative = (p: string) => !/^[a-zA-Z]:[\\/]|^[\\/]/.test(p) && !/[\\/]/.test(p)

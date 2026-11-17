@@ -11,11 +11,11 @@ import type { Checked, CustomBackground } from '../core/media'
 import { safeCss } from '../core/resolve'
 import type { Payload, Theme } from '../core/resolve'
 import { convertV1Css, finalize, fromV1, parseRules, parseTheme } from '../core/schema'
-import { infoOf, planRemove, removedEntries, removedName } from '../core/removal'
+import { idFor, infoOf, planRemove, removedEntries, removedName } from '../core/removal'
 import type { ThemeFileInfo } from '../core/removal'
 import type { Draft, Rule } from '../core/schema'
 
-export const VERSION = '0.8.0'
+export const VERSION = '0.8.1'
 export type Tier2State = 'unsupported' | 'missing' | 'restart' | 'active'
 export type Tier2 = { state: Tier2State; slot?: string }
 
@@ -495,6 +495,12 @@ async function themeInfos($: EngineInterface, dir: string): Promise<ThemeFileInf
     out.push(infoOf(e.name, raw))
   }
   return out
+}
+
+/** The id of your theme that `typed` (an id or a display name) names; see idFor. */
+export async function ownThemeId($: EngineInterface, typed: string): Promise<string> {
+  const home = await prismHome($)
+  return idFor(home ? await themeInfos($, join(home, 'themes')) : [], typed)
 }
 
 /** Moves one of your themes (its file and its own stylesheet) to removed/<id>~<time>. Built-ins stay. */

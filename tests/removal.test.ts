@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { infoOf, planRemove, removedEntries, removedName } from '../core/removal'
+import { idFor, infoOf, planRemove, removedEntries, removedName, slugOf } from '../core/removal'
 
 const files = [
   infoOf('miku.json', { id: 'miku', css: 'miku.css', background: { file: 'D:/Wallpapers/miku.mp4' } }),
@@ -13,7 +13,7 @@ const builtins = ['dusk', 'paper']
 test('remove: your own theme moves with its stylesheet; a background file outside the folder is never touched', async () => {
   expect(planRemove(files, 'miku', builtins)).toEqual({ json: 'miku.json', css: 'miku.css', keepCss: false, media: undefined })
   expect(planRemove(files, 'afterschool-rain', builtins)).toEqual({ json: 'rain.json', css: undefined, keepCss: false, media: 'rain.mp4' })
-  expect(infoOf('broken.json', undefined)).toEqual({ file: 'broken.json', id: undefined, extends: undefined, css: undefined, media: undefined })
+  expect(infoOf('broken.json', undefined)).toEqual({ file: 'broken.json', id: undefined, name: undefined, extends: undefined, css: undefined, media: undefined })
 })
 
 test('remove: built-ins, unknown ids, duplicates and themes others extend are refused', async () => {
@@ -23,6 +23,18 @@ test('remove: built-ins, unknown ids, duplicates and themes others extend are re
   expect((planRemove(twice, 'miku', builtins) as { error: string }).error.startsWith('More than one file has the id "miku"')).toBe(true)
   const child = [...files, infoOf('miku-night.json', { id: 'miku-night', extends: 'miku' })]
   expect((planRemove(child, 'miku', builtins) as { error: string }).error).toBe('miku-night extends miku. Remove that first, or change their "extends".')
+})
+
+test('remove: a theme can be named by its id in any case, spaces for hyphens, or its display name', async () => {
+  const named = [...files, infoOf('ellen.json', { id: 'ellen-rooftop', name: 'Ellen on the Rooftop' })]
+  expect(idFor(named, 'afterschool rain')).toBe('afterschool-rain')
+  expect(idFor(named, '  Afterschool  Rain ')).toBe('afterschool-rain')
+  expect(idFor(named, 'MIKU')).toBe('miku')
+  expect(idFor(named, 'ellen on the  rooftop')).toBe('ellen-rooftop')
+  expect(idFor(named, 'Nope Theme')).toBe('nope-theme')
+  const twoNames = [...named, infoOf('ellen-2.json', { id: 'ellen-two', name: 'Ellen on the Rooftop' })]
+  expect(idFor(twoNames, 'Ellen on the Rooftop')).toBe('ellen-on-the-rooftop')
+  expect(slugOf(' Afterschool Rain ')).toBe('afterschool-rain')
 })
 
 test('remove: a stylesheet another theme also uses stays', async () => {

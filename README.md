@@ -99,7 +99,7 @@ paints the palette.
 | `/prism set` | list every adjustable part, its value and its range (see below) |
 | `/prism set <key> <value>` | change one, e.g. `/prism set panels.blur 0` |
 | `/prism reset <key>`, `/prism reset all` | back to the defaults |
-| `/prism remove <id>` | remove one of your themes: its file and its own stylesheet move to `prism-themes\removed\` |
+| `/prism remove <id or name>` | remove one of your themes: its file and its own stylesheet move to `prism-themes\removed\` |
 | `/prism restore`, `/prism restore <id>` | list removed themes, or bring one back |
 | `/prism reload` | re-read your themes folder |
 | `/prism import <folder>` | import themes made for claude-desktop-themes |
@@ -160,7 +160,8 @@ The full format, with stylesheets and the attributes they can react to, is in
 
 Secondary and muted text always keep a WCAG AA contrast (4.5:1) against the theme's background, whatever the palette.
 
-To remove a theme of yours, run `/prism remove <id>`. Nothing is deleted outright: the theme file and its stylesheet
+To remove a theme of yours, run `/prism remove <id>`. The display name works too, in any case
+(`/prism remove Afterschool Rain`), and so does the id with spaces for hyphens. Nothing is deleted outright: the theme file and its stylesheet
 move to `.claude\prism-themes\removed\<id>~<date-time>\`, and `/prism restore <id>` puts them back. To remove a
 theme for good, delete that folder. A few things are refused or left alone:
 

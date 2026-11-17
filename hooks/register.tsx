@@ -7,6 +7,7 @@ import type { HealthLevel, HealthProblem } from '../core/health'
 import type { CustomBackground } from '../core/media'
 import { OFFICIAL_SVG_MAX, glassFor, isOlderEngine, sceneName, sceneOf, schemeFor } from '../core/official'
 import type { Glass } from '../core/official'
+import { slugOf } from '../core/removal'
 import { gradientSvg, resolve } from '../core/resolve'
 import type { Panels, Theme } from '../core/resolve'
 import { pickRule } from '../core/schema'
@@ -16,7 +17,7 @@ import { THEMES } from '../core/themes'
 import type { Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
   discover, ensureAssets, importV1, inspectBackground, install, loadLibrary, nextPulseN, providerFor, readPayloadId,
-  listRemoved, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
+  listRemoved, ownThemeId, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
   writeHealth, writePayload,
 } from './host'
 import type { Library, PulseKind, SessionEvent, SessionState } from './host'
@@ -450,10 +451,10 @@ async function setting($: EngineInterface, args: string): Promise<string> {
     }
     case 'remove':
     case 'delete': {
-      if (!value) return 'Usage: /prism remove <id> — moves one of your themes out of the themes folder (/prism restore <id> brings it back)'
+      if (!value) return 'Usage: /prism remove <id or name> — moves one of your themes out of the themes folder (/prism restore <id> brings it back)'
       if (!discovery.os) await refresh($)
       if (!discovery.os) return 'Removing themes needs Windows or macOS.'
-      const id = value.toLowerCase()
+      const id = await ownThemeId($, value)
       const out = await removeTheme($, discovery.os, id, THEMES.map(t => t.id))
       if (!out.ok) return out.message
       await reloadLibrary($)
@@ -474,7 +475,7 @@ async function setting($: EngineInterface, args: string): Promise<string> {
       }
       if (!discovery.os) await refresh($)
       if (!discovery.os) return 'Restoring themes needs Windows or macOS.'
-      const out = await restoreTheme($, discovery.os, value.toLowerCase())
+      const out = await restoreTheme($, discovery.os, slugOf(value))
       if (out.ok) await reloadLibrary($)
       return out.message
     }
