@@ -39,6 +39,13 @@ try {
     <div id="test-card" data-prism-test class="[--resource-card-row-padding-x:0.75rem]"><div id="test-card-body" data-prism-test class="bg-surface"></div><pre><code><div id="test-code" data-prism-test class="bg-surface">Code</div></code></pre></div>
     <div role="dialog"><div id="test-dialog-panel" data-prism-test data-summary-panel-variant="summary"><header id="test-dialog-header" data-prism-test></header></div><div id="test-dialog-composer" data-prism-test data-composer-layout="multiline" data-composer-surface-variant="default"></div></div>\`;
     document.getElementById('root').append(section);
+    const workspace=document.createElement('div');workspace.id='prism-shell-fixture';workspace.setAttribute('data-app-shell-workspace','true');
+    workspace.style.cssText='position:fixed;left:20vw;top:10vh;width:65vw;height:75vh;pointer-events:none';
+    workspace.innerHTML=\`<div id="test-shell-backing" data-prism-test data-app-shell-surface-backing="true" class="bg-surface pointer-events-none" style="position:absolute;inset:0;background:#181818"></div>
+      <main id="test-shell-main" data-prism-test data-app-shell-main-surface="default" class="bg-surface" style="position:absolute;inset:0;background:#181818"></main>\`;
+    const fallback=document.createElement('div');fallback.style.cssText='visibility:hidden;position:fixed;inset:0';
+    fallback.innerHTML='<main id="test-hidden-fallback" data-prism-test class="bg-surface" style="width:100vw;height:100vh;background:#181818"></main>';
+    document.getElementById('root').append(workspace,fallback);
   })()`);
   const before=await renderer.evaluate(snapshot);
   const codeFontBefore=await renderer.evaluate(`getComputedStyle(document.getElementById('test-code')).fontFamily`);
@@ -50,6 +57,11 @@ try {
   assert.equal(fonts.code,codeFontBefore);
   report.checks.fontAppliedWithoutChangingCode=true;
   const after=await renderer.evaluate(snapshot);
+  for(const key of ['test-shell-main','test-shell-backing'])assert.equal(after[key].alpha,0,key);
+  assert.equal(after['test-hidden-fallback'].alpha,before['test-hidden-fallback'].alpha);
+  assert.equal(await renderer.evaluate(`document.getElementById('test-hidden-fallback').hasAttribute('data-prism-wallpaper-surface')`),false);
+  report.checks.newAppShellMainAndBackingTransparent=true;
+  report.checks.hiddenFallbackExcluded=true;
   assert.equal(after['test-top-fade'].image,'none'); assert.equal(after['test-top-fade'].alpha,0);
   assert.equal(after['test-bottom-fade'].image,'none'); assert.equal(after['test-bottom-fade'].alpha,0);
   assert.equal(after['test-footer-background'].image,'none');assert.equal(after['test-footer-background'].alpha,0);

@@ -46,6 +46,15 @@ try {
   const applied = await renderer.evaluate(wallpaperExpression('apply', { runId: owner, image, settings: { dim: .4, controls: false }, ttlMs: 15000 }));
   assert.ok(applied.visible && applied.count === 1 && applied.surfaceCount > 0);
   result.checks.imageVisible = true;
+  const shellSurfaces = await renderer.evaluate(`(()=>{
+    const owner=${JSON.stringify(owner)};
+    return [...document.querySelectorAll('#root main[data-app-shell-main-surface="default"],#root [data-app-shell-workspace="true"] > [data-app-shell-surface-backing="true"]')].filter(element=>{
+      const rect=element.getBoundingClientRect(),style=getComputedStyle(element);
+      return style.visibility==='visible'&&rect.width>=innerWidth*.3&&rect.height>=innerHeight*.5;
+    }).map(element=>({owned:element.getAttribute('data-prism-wallpaper-surface')===owner,background:getComputedStyle(element).backgroundColor}));
+  })()`);
+  assert.ok(shellSurfaces.every(surface=>surface.owned&&surface.background==='rgba(0, 0, 0, 0)'), 'A reviewed app-shell layer still hides the wallpaper');
+  result.checks.surfacesTransparent = true;
   const changed = await renderer.evaluate(wallpaperExpression('update', { runId: owner, settings: { dim: .6 } }));
   assert.equal(changed.settings.dim, .6);
   result.checks.settingsChanged = true;

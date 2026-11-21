@@ -161,12 +161,15 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
     const root = document.getElementById('root');
     if (!root) throw new Error('The reviewed app root was not found.');
     const found = new Set();
-    const candidates = [...root.querySelectorAll('.bg-surface, main')].slice(0, 1000);
+    const candidates = [...root.querySelectorAll('.bg-surface, main, [data-app-shell-surface-backing="true"]')].slice(0, 1000);
     for (const element of candidates) {
-      if (element.closest('[role="dialog"],[aria-modal="true"]')) continue;
+      if (element.closest('[role="dialog"],[aria-modal="true"],pre,code')) continue;
+      const computed = getComputedStyle(element);
+      if (computed.visibility !== 'visible' || computed.display === 'none') continue;
       const rect = element.getBoundingClientRect();
-      const mainSurface = element.tagName === 'MAIN' && [...element.classList].some(name => name.startsWith('MainContentSurface-'));
-      if (mainSurface ? (rect.width < innerWidth * .3 || rect.height < innerHeight * .5) : (rect.width < innerWidth * .85 || rect.height < innerHeight * .85)) continue;
+      const mainSurface = element.tagName === 'MAIN' && (element.getAttribute('data-app-shell-main-surface') === 'default' || [...element.classList].some(name => name.startsWith('MainContentSurface-')));
+      const shellBacking = element.getAttribute('data-app-shell-surface-backing') === 'true' && element.parentElement?.getAttribute('data-app-shell-workspace') === 'true' && computed.pointerEvents === 'none';
+      if (mainSurface || shellBacking ? (rect.width < innerWidth * .3 || rect.height < innerHeight * .5) : (rect.width < innerWidth * .85 || rect.height < innerHeight * .85)) continue;
       if (element.hasAttribute(surfaceAttribute) && element.getAttribute(surfaceAttribute) !== runId) continue;
       found.add(element);
     }
@@ -387,7 +390,7 @@ export async function wallpaperRuntime(action, options, validateSettings, parseC
         state.observer = new MutationObserver(records => {
           if (records.some(record => !state.layer.contains(record.target) && !state.controls?.contains(record.target) && record.target !== state.style)) schedule();
         });
-        state.observer.observe(document.getElementById('root'), { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
+        state.observer.observe(document.getElementById('root'), { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'data-app-shell-main-surface', 'data-app-shell-surface-backing', 'data-app-shell-workspace'] });
         state.themeObserver = new MutationObserver(schedule);
         state.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
       } catch (error) { dispose(state); throw error; }

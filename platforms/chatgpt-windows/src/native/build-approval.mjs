@@ -1,4 +1,4 @@
-export const BUILD_CONTRACT = 1;
+export const BUILD_CONTRACT = 2;
 const fields = ['package', 'image', 'executableSha256', 'archiveSha256'];
 
 export function validateBuild(build) {
@@ -14,6 +14,6 @@ export function approvedBuild(cache, candidate) {
 
 export function addApproval(cache, approval) {
   validateBuild(approval);
-  if (approval.contract !== BUILD_CONTRACT || !approval.passed || !['imageVisible','settingsChanged','restored','installedFilesUnchanged','listenerClosed'].every(key => approval.checks?.[key] === true)) throw new Error('A passing renderer contract is required');
+  if (approval.contract !== BUILD_CONTRACT || !approval.passed || !['imageVisible','surfacesTransparent','settingsChanged','restored','installedFilesUnchanged','listenerClosed'].every(key => approval.checks?.[key] === true)) throw new Error('A passing renderer contract is required');
   return { schema: 1, builds: [...(cache?.builds ?? []).filter(build => !fields.every(key => build[key] === approval[key])), approval].slice(-16) };
 }

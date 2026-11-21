@@ -1,0 +1,25 @@
+{
+  "package": "OpenAI.Codex_26.1117.4957.0_x64__2p2nqsd0c76g0",
+  "implementationVersion": 9,
+  "rendererContract": 2,
+  "unitTests": { "passed": 44, "failed": 0 },
+  "isolatedChecks": {
+    "newAppShellMainAndBackingTransparent": true,
+    "hiddenFallbackExcluded": true,
+    "controlsCodeAndDialogsPreserved": true,
+    "nativeStylesRestored": true,
+    "installedFilesUnchanged": true,
+    "listenerClosed": true
+  },
+  "liveChecks": {
+    "mainTransparent": true,
+    "backingTransparent": true,
+    "videoAdvancing": true,
+    "preferencesPreserved": true,
+    "themeLibraryPreserved": true,
+    "appliedWindows": 1,
+    "deferredWindows": 1,
+    "errors": []
+  },
+  "limitations": ["Light mode and other app views were not visually verified."]
+}
