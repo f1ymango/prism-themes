@@ -5,6 +5,8 @@ description: Set up and customize local wallpaper and matching themes in the Win
 
 # Prism desktop wallpaper and themes
 
+For recurring visual defects such as a dark band or an opaque conversation panel, read `app\native\visual-regressions.md` under the installation root (or `native/visual-regressions.md` in the development source). A positive `appliedWindows` count confirms the media was applied; it does not establish that every native background or pseudo-element is transparent.
+
 Installation root: `__PRISM_INSTALL_ROOT__`.
 Development source: `__PRISM_SOURCE_ROOT__`. Before the first setup, the installer and controller are available under `scripts\native` there. After installation, prefer the installed copies so normal use does not depend on this checkout.
 

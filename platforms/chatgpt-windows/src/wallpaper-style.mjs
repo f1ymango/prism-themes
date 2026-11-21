@@ -7,7 +7,9 @@ export function wallpaperStyle(runId, theme = null) {
   const scope = selectors => selectors.map(selector => `${root} #root ${selector}${exclude}`).join(',\n');
   const fade = scope([
     '[class*="MainContentTopFade-"]',
+    '[data-app-shell-main-surface="default"] .pointer-events-none[class*="--app-shell-content-fade"]',
     '.thread-scroll-container [class*="background-"][class*="fade-"].pointer-events-none',
+    '.thread-scroll-container > .pointer-events-none:has(> [data-thread-scroll-footer="true"])',
     '[data-thread-scroll-footer] > .pointer-events-none',
     '[data-thread-scroll-footer] > .pointer-events-none *',
   ]);

@@ -1,5 +1,7 @@
 # Surface transparency
 
+For the update-by-update history, known selectors, and repair acceptance checks, read [recurring visual regressions](../native/visual-regressions.md).
+
 Implementation version 5 addresses the opaque regions visible over the user's video wallpaper in the Codex dark view. These were native app backgrounds that the initial wallpaper stylesheet did not cover.
 
 - The horizontal dark boundary below the conversation title was the native `MainContentTopFade` gradient.

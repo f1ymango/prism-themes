@@ -55,6 +55,16 @@ try {
   })()`);
   assert.ok(shellSurfaces.every(surface=>surface.owned&&surface.background==='rgba(0, 0, 0, 0)'), 'A reviewed app-shell layer still hides the wallpaper');
   result.checks.surfacesTransparent = true;
+  const decorativeFades = await renderer.evaluate(`(()=>{
+    const selectors='#root [data-app-shell-main-surface="default"] .pointer-events-none[class*="--app-shell-content-fade"],#root .thread-scroll-container > .pointer-events-none:has(> [data-thread-scroll-footer="true"])';
+    return [...document.querySelectorAll(selectors)].filter(element=>{
+      const rect=element.getBoundingClientRect();return getComputedStyle(element).visibility==='visible'&&rect.width>0&&rect.height>0;
+    }).flatMap(element=>[null,'::before','::after'].map(pseudo=>{
+      const style=getComputedStyle(element,pseudo);return {background:style.backgroundColor,image:style.backgroundImage,shadow:style.boxShadow};
+    }));
+  })()`);
+  assert.ok(decorativeFades.every(fade=>fade.background==='rgba(0, 0, 0, 0)'&&fade.image==='none'&&fade.shadow==='none'), 'A decorative app-shell fade still hides the wallpaper');
+  result.checks.decorativeFadesTransparent = true;
   const changed = await renderer.evaluate(wallpaperExpression('update', { runId: owner, settings: { dim: .6 } }));
   assert.equal(changed.settings.dim, .6);
   result.checks.settingsChanged = true;

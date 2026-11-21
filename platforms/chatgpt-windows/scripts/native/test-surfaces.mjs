@@ -17,7 +17,7 @@ let app, original, session, renderer;
 const report = { result: 'failed', checks: {}, error: null };
 const snapshot = `(()=>{
   const alpha=color=>{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=color;x.fillRect(0,0,1,1);return x.getImageData(0,0,1,1).data[3]/255};
-  return Object.fromEntries([...document.querySelectorAll('[data-prism-test]')].map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return [e.id,{alpha:alpha(s.backgroundColor),background:s.backgroundColor,image:s.backgroundImage,beforeAlpha:alpha(getComputedStyle(e,'::before').backgroundColor),width:r.width,height:r.height,pointer:s.pointerEvents}]}));
+    return Object.fromEntries([...document.querySelectorAll('[data-prism-test]')].map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect(),before=getComputedStyle(e,'::before'),after=getComputedStyle(e,'::after');return [e.id,{alpha:alpha(s.backgroundColor),background:s.backgroundColor,image:s.backgroundImage,mask:s.maskImage,beforeAlpha:alpha(before.backgroundColor),beforeImage:before.backgroundImage,afterAlpha:alpha(after.backgroundColor),afterImage:after.backgroundImage,width:r.width,height:r.height,pointer:s.pointerEvents}]}));
 })()`;
 try {
   app = await discoverApp(); original = await snapshotAppRoots(app.executable);
@@ -30,10 +30,14 @@ try {
       #prism-surface-fixture [data-prism-test]{width:300px;height:24px;background:rgb(45,45,45)}
       #prism-surface-fixture header::before{content:'';background:rgb(45,45,45);height:8px}
       #test-top-fade,#test-bottom-fade,#test-footer-background{background-image:linear-gradient(#181818,transparent)!important}
+      #test-footer-wrapper::before{content:'';display:block;height:12px;background-image:linear-gradient(transparent,#181818)}
+      #test-footer-wrapper::after{content:'';display:block;height:16px;background:#181818}
     </style>
     <div id="test-top-fade" data-prism-test class="MainContentTopFade-fixture"></div>
     <div class="thread-scroll-container"><div id="test-bottom-fade" data-prism-test class="background-fixture fade-fixture pointer-events-none"></div></div>
     <div data-thread-scroll-footer="true"><div id="test-footer-background" data-prism-test class="pointer-events-none bg-surface"></div></div>
+    <main data-app-shell-main-surface="default"><div id="test-current-top-fade" data-prism-test class="pointer-events-none h-[var(--app-shell-content-fade-height)]" style="background-image:linear-gradient(#181818,transparent)"></div></main>
+    <div class="thread-scroll-container"><div id="test-footer-wrapper" data-prism-test class="pointer-events-none"><div data-thread-scroll-footer="true"><div id="test-editor-mask" data-prism-test class="vertical-scroll-fade-mask" contenteditable="true" style="mask-image:linear-gradient(transparent,black 10%,black 90%,transparent)">Editor</div></div></div></div>
     <div id="test-panel" data-prism-test data-summary-panel-variant="summary"><header id="test-panel-header" data-prism-test></header></div>
     <div id="test-composer" data-prism-test data-composer-layout="multiline" data-composer-surface-variant="default" data-composer-dark><button id="test-button" data-prism-test>Control</button></div>
     <div id="test-card" data-prism-test class="[--resource-card-row-padding-x:0.75rem]"><div id="test-card-body" data-prism-test class="bg-surface"></div><pre><code><div id="test-code" data-prism-test class="bg-surface">Code</div></code></pre></div>
@@ -65,6 +69,12 @@ try {
   assert.equal(after['test-top-fade'].image,'none'); assert.equal(after['test-top-fade'].alpha,0);
   assert.equal(after['test-bottom-fade'].image,'none'); assert.equal(after['test-bottom-fade'].alpha,0);
   assert.equal(after['test-footer-background'].image,'none');assert.equal(after['test-footer-background'].alpha,0);
+  assert.equal(after['test-current-top-fade'].image,'none');assert.equal(after['test-current-top-fade'].alpha,0);
+  for(const field of ['beforeImage','afterImage'])assert.equal(after['test-footer-wrapper'][field],'none');
+  for(const field of ['beforeAlpha','afterAlpha'])assert.equal(after['test-footer-wrapper'][field],0);
+  assert.deepEqual(after['test-editor-mask'],before['test-editor-mask']);
+  report.checks.currentTopFadeAndFooterPseudoLayersTransparent=true;
+  report.checks.editorScrollingMaskPreserved=true;
   report.checks.decorativeFadesRemoved=true;
   for(const key of ['test-panel','test-composer','test-card'])assert.ok(after[key].alpha>.7&&after[key].alpha<.8,key);
   assert.equal(after['test-panel-header'].alpha,0);assert.equal(after['test-panel-header'].beforeAlpha,0);
