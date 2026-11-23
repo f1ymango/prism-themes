@@ -56,12 +56,18 @@
   // Side panels over a background: mark each panel, and the layers inside it that paint most of it a solid colour.
   // Judged by size and colour, never by class name; rows, buttons and hover states are small and keep theirs.
   const PANEL_ROLES = ['sidebar', 'sidePanel'];
-  const opaque = el => {
-    const m = getComputedStyle(el).backgroundColor.match(/rgba?\(([^)]+)\)/);
-    if (!m) return false;
-    const parts = m[1].split(/[\s,/]+/).filter(Boolean);
-    return (parts.length > 3 ? parseFloat(parts[3]) : 1) > 0.5;
+  // A computed colour's alpha, in any form the app uses: rgb()/rgba(), and color(srgb r g b / a), oklch(), lab() and
+  // the like, which Desktop 6 hands out when a theme's palette is the app's own (data-cds-theme=mod-palette).
+  const alphaOf = c => {
+    if (!c || c === 'transparent') return 0;
+    const m = c.match(/\(([^()]*)\)\s*$/);
+    if (!m) return 1;
+    const num = v => (v.trim().endsWith('%') ? parseFloat(v) / 100 : parseFloat(v));
+    if (m[1].includes('/')) return num(m[1].split('/').pop());
+    const parts = m[1].split(/[\s,]+/).filter(Boolean);
+    return /^(rgb|hsl)a?\(/.test(c) && parts.length > 3 ? num(parts[3]) : 1;
   };
+  const opaque = el => alphaOf(getComputedStyle(el).backgroundColor) > 0.5;
   const clearPanels = () => {
     for (const el of document.querySelectorAll('[data-tfc-panel],[data-tfc-clear]')) {
       el.removeAttribute('data-tfc-panel');
@@ -171,7 +177,15 @@
     for (const el of document.querySelectorAll('[data-tfc-see]')) if (!want.has(el)) el.removeAttribute('data-tfc-see');
     for (const el of want) if (!el.hasAttribute('data-tfc-see')) el.setAttribute('data-tfc-see', '');
   };
-  const scheduleGlass = () => { if (!glassTimer) glassTimer = setTimeout(() => { seeThrough(); glassify(); }, 300); };
+  // each pass on its own: one that fails never stops the other, nor the passes after it
+  const scheduleGlass = () => {
+    if (glassTimer) return;
+    glassTimer = setTimeout(() => {
+      glassTimer = 0;
+      try { seeThrough(); } catch (err) { console.warn('prism-themes: see-through pass failed', err); }
+      try { glassify(); } catch (err) { console.warn('prism-themes: glass pass failed', err); }
+    }, 300);
+  };
 
   const appMode = () => {
     const m = root.getAttribute('data-tfc-was-mode') || root.dataset.mode;
