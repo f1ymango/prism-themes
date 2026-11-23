@@ -13,7 +13,9 @@ export const ROLES: Record<string, string[]> = {
   // the right-hand panel (environment, context, outputs): the tile shell that holds no chat
   sidePanel: ['.tiles-shell:not(:has(.epitaxy-chat-panel))'],
   grid: ['.root > .grid.bg-surface-1'],
-  composer: ['[data-cds=ChatComposer] > .bg-surface-3', '[data-cds=ChatComposer] > div'],
+  // Desktop 6 splits the composer into the card you type in and a "chin" (the status row under it)
+  composer: ['[data-cds=ChatComposer] [data-cds-part=composer-card]', '[data-cds=ChatComposer] > .bg-surface-3', '[data-cds=ChatComposer] > div'],
+  composerChin: ['[data-cds=ChatComposerChin]'],
   transcript: ['.epitaxy-transcript-typography'],
   startCard: ['[data-testid=epitaxy-start-card]'],
   codeBlock: ['diffs-container'],
@@ -51,6 +53,8 @@ export const WALL_RULES: RoleRule[] = [
   { id: 'wall-tiles', roles: ['tiles'], css: 'html[data-tfc-wall] @{tiles} { background: transparent !important; }' },
   { id: 'wall-grid', roles: ['grid'], css: 'html[data-tfc-wall] @{grid} { background: transparent !important; }' },
   { id: 'glass', roles: ['composer'], css: 'html[data-tfc-wall] @{composer} { background: var(--prism-glass) !important; backdrop-filter: blur(var(--prism-composer-blur, 10px)); }' },
+  // the status row under the composer sits on the background itself, like the transcript's text
+  { id: 'chin', roles: ['composerChin'], css: 'html[data-tfc-wall] @{composerChin} { background: transparent !important; backdrop-filter: none !important; }' },
   // Side panels over a background. The page marks them (data-tfc-panel) and the big solid layers inside them
   // (data-tfc-clear) itself, by size and colour rather than by class name, so a renamed inner class changes nothing.
   {

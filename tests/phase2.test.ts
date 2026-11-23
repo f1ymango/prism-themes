@@ -17,7 +17,7 @@ const ALL = [...BASE_RULES, ...WALL_RULES, ...REACTION_RULES]
 test('C4: on today\'s page every rule but the absent ones applies', async () => {
   const r = resolveRoles(ROLES, page(TODAY))
   const { css, dropped } = compileRules(ALL, r)
-  expect(dropped.sort()).toEqual(['code', 'sidebar-collapsed']) // no code block, sidebar open: absent, not broken
+  expect(dropped.sort()).toEqual(['chin', 'code', 'sidebar-collapsed']) // no chin (Desktop 4), no code block, sidebar open: absent, not broken
   expect(css.includes('@{')).toBe(false)
   expect(css.includes('.dframe-root:not([data-collapsed]) .dframe-sidebar')).toBe(true)
   expect(safeCss(css)).toBe(true)
@@ -27,7 +27,17 @@ test('C4: on today\'s page every rule but the absent ones applies', async () => 
 test('C4: a renamed selector turns off exactly its own role\'s rules', async () => {
   const renamed = TODAY.filter(s => s !== '.tiles-shell')
   const { dropped } = compileRules(ALL, resolveRoles(ROLES, page(renamed)))
-  expect(dropped.sort()).toEqual(['code', 'sidebar-collapsed', 'wall-tiles'])
+  expect(dropped.sort()).toEqual(['chin', 'code', 'sidebar-collapsed', 'wall-tiles'])
+})
+
+test('C4: Desktop 6 splits the composer; the glass goes on the card alone, and the status row under it stays clear', async () => {
+  const six = TODAY.filter(s => s !== '[data-cds=ChatComposer] > .bg-surface-3')
+    .concat('[data-cds=ChatComposer] [data-cds-part=composer-card]', '[data-cds=ChatComposer] > div', '[data-cds=ChatComposerChin]')
+  const r = resolveRoles(ROLES, page(six))
+  expect(r.composer).toBe('[data-cds=ChatComposer] [data-cds-part=composer-card]')
+  const { css } = compileRules(ALL, r)
+  expect(css.includes('[data-cds=ChatComposer] > div {')).toBe(false)
+  expect(css.includes('[data-cds=ChatComposerChin] { background: transparent !important')).toBe(true)
 })
 
 test('C4: a role falls back to its next selector, and no readable panels means no page background', async () => {

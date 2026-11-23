@@ -68,6 +68,16 @@
     return /^(rgb|hsl)a?\(/.test(c) && parts.length > 3 ? num(parts[3]) : 1;
   };
   const opaque = el => alphaOf(getComputedStyle(el).backgroundColor) > 0.5;
+  // An element's children, looking through `display: contents` wrappers, which have no box of their own and would
+  // otherwise hide every layer inside them from a size check.
+  const kids = el => {
+    const out = [];
+    for (const c of el.children) {
+      if (getComputedStyle(c).display === 'contents') out.push(...kids(c));
+      else out.push(c);
+    }
+    return out;
+  };
   const clearPanels = () => {
     for (const el of document.querySelectorAll('[data-tfc-panel],[data-tfc-clear]')) {
       el.removeAttribute('data-tfc-panel');
@@ -81,7 +91,7 @@
     const area = box.width * box.height;
     if (!area) return 0;
     let count = 0;
-    let level = [...panel.children];
+    let level = kids(panel);
     for (let depth = 0; depth < 6 && level.length; depth++) {
       const next = [];
       for (const el of level) {
@@ -89,7 +99,7 @@
         if (r.width * r.height < area * 0.6) continue;
         if (el.hasAttribute('data-tfc-clear')) count++;
         else if (opaque(el)) { el.setAttribute('data-tfc-clear', ''); count++; }
-        next.push(...el.children);
+        next.push(...kids(el));
       }
       level = next;
     }
@@ -129,7 +139,7 @@
       if ([...panels.keys()].some(p => p === el || p.contains(el) || el.contains(p))) return;
       const narrow = el.getBoundingClientRect().width < innerWidth * 0.9; // a full-window layer is never a pane
       if (narrow && (el.hasAttribute('data-tfc-panel') || opaque(el) || clearInside(el))) { panels.set(el, 'pane'); return; }
-      if (depth < 3) for (const child of el.children) if (big(child)) visit(child, depth + 1);
+      if (depth < 3) for (const child of kids(el)) if (big(child)) visit(child, depth + 1);
     };
     for (const el of paneCandidates()) visit(el, 0);
     for (const [panel, role] of panels) {
@@ -153,7 +163,7 @@
       if (r.width * r.height < windowArea * 0.25) continue;
       if (solid(el)) want.add(el);
       // an empty layer laid behind the column (no children: never a dialog or a page with content)
-      for (const sib of el.children) {
+      for (const sib of kids(el)) {
         if (sib.childElementCount || sib.contains(composer)) continue;
         const s = sib.getBoundingClientRect();
         if (s.width * s.height >= r.width * r.height * 0.6 && solid(sib)) want.add(sib);
@@ -162,14 +172,14 @@
     if (content) {
       const box = content.getBoundingClientRect();
       const area = box.width * box.height;
-      let level = [...content.children];
+      let level = kids(content);
       for (let depth = 0; area && depth < 8 && level.length; depth++) {
         const next = [];
         for (const el of level) {
           const r = el.getBoundingClientRect();
           if (r.width * r.height < area * 0.6) continue;
           if (solid(el)) want.add(el);
-          next.push(...el.children);
+          next.push(...kids(el));
         }
         level = next;
       }
