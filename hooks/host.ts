@@ -15,7 +15,7 @@ import { idFor, infoOf, planRemove, removedEntries, removedName } from '../core/
 import type { ThemeFileInfo } from '../core/removal'
 import type { Draft, Rule } from '../core/schema'
 
-export const VERSION = '0.9.3'
+export const VERSION = '0.9.4'
 export type Tier2State = 'unsupported' | 'missing' | 'restart' | 'active'
 export type Tier2 = { state: Tier2State; slot?: string }
 

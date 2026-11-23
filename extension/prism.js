@@ -135,13 +135,28 @@
     };
     // A pane counts only when it really paints a solid surface (never glass over an invisible overlay); a wrapper
     // that paints nothing itself is searched for the panes inside it.
+    // the chat column itself is never a pane: it lies over the composer's centre (a pane sits beside the chat)
+    const composer = lastResolved.composer && document.querySelector(lastResolved.composer);
+    const cb = composer?.getBoundingClientRect();
+    const chatColumn = el => {
+      if (!cb) return false;
+      const r = el.getBoundingClientRect(), cx = cb.left + cb.width / 2;
+      return r.left <= cx && r.right >= cx && r.bottom <= cb.top + 4;
+    };
     const visit = (el, depth) => {
       if ([...panels.keys()].some(p => p === el || p.contains(el) || el.contains(p))) return;
+      if (chatColumn(el)) return;
       const narrow = el.getBoundingClientRect().width < innerWidth * 0.9; // a full-window layer is never a pane
       if (narrow && (el.hasAttribute('data-tfc-panel') || opaque(el) || clearInside(el))) { panels.set(el, 'pane'); return; }
       if (depth < 3) for (const child of kids(el)) if (big(child)) visit(child, depth + 1);
     };
     for (const el of paneCandidates()) visit(el, 0);
+    // a layer that is no longer a pane (the chat column an earlier pass took for one) gives its marks back
+    for (const el of document.querySelectorAll('[data-tfc-panel]')) {
+      if (panels.has(el)) continue;
+      el.removeAttribute('data-tfc-panel');
+      for (const inner of el.querySelectorAll('[data-tfc-clear]')) inner.removeAttribute('data-tfc-clear');
+    }
     for (const [panel, role] of panels) {
       clearInside(panel);
       if (panel.getAttribute('data-tfc-panel') !== role) panel.setAttribute('data-tfc-panel', role);
@@ -183,6 +198,12 @@
         }
         level = next;
       }
+    }
+    // thin empty strips the full height of the window (a solid seam between the sidebar and the chat)
+    for (const el of document.querySelectorAll('body div:empty')) {
+      const r = el.getBoundingClientRect();
+      const tall = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+      if (r.width > 0 && r.width <= 48 && tall >= innerHeight * 0.5 && solid(el)) want.add(el);
     }
     for (const el of document.querySelectorAll('[data-tfc-see]')) if (!want.has(el)) el.removeAttribute('data-tfc-see');
     for (const el of want) if (!el.hasAttribute('data-tfc-see')) el.setAttribute('data-tfc-see', '');
