@@ -119,6 +119,18 @@
     }
     return [...out];
   };
+  // The chat column: a layer over the composer's centre, above it. Never a pane (a pane sits beside the chat); the
+  // see-through pass clears it instead.
+  const chatColumns = () => {
+    const composer = lastResolved.composer && document.querySelector(lastResolved.composer);
+    const cb = composer?.getBoundingClientRect();
+    if (!cb) return [];
+    const cx = cb.left + cb.width / 2;
+    return paneCandidates().filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.left <= cx && r.right >= cx && r.bottom <= cb.top + 4;
+    });
+  };
   const glassify = () => {
     glassTimer = 0;
     const want = !!theme && root.hasAttribute('data-tfc-wall') && ['glass', 'clear'].includes(theme.panels);
@@ -135,17 +147,10 @@
     };
     // A pane counts only when it really paints a solid surface (never glass over an invisible overlay); a wrapper
     // that paints nothing itself is searched for the panes inside it.
-    // the chat column itself is never a pane: it lies over the composer's centre (a pane sits beside the chat)
-    const composer = lastResolved.composer && document.querySelector(lastResolved.composer);
-    const cb = composer?.getBoundingClientRect();
-    const chatColumn = el => {
-      if (!cb) return false;
-      const r = el.getBoundingClientRect(), cx = cb.left + cb.width / 2;
-      return r.left <= cx && r.right >= cx && r.bottom <= cb.top + 4;
-    };
+    const columns = chatColumns();
     const visit = (el, depth) => {
       if ([...panels.keys()].some(p => p === el || p.contains(el) || el.contains(p))) return;
-      if (chatColumn(el)) return;
+      if (columns.includes(el)) return;
       const narrow = el.getBoundingClientRect().width < innerWidth * 0.9; // a full-window layer is never a pane
       if (narrow && (el.hasAttribute('data-tfc-panel') || opaque(el) || clearInside(el))) { panels.set(el, 'pane'); return; }
       if (depth < 3) for (const child of kids(el)) if (big(child)) visit(child, depth + 1);
@@ -199,6 +204,22 @@
         level = next;
       }
     }
+    // the chat column beside the composer, and the layers that fill most of it
+    for (const column of chatColumns()) {
+      const box = column.getBoundingClientRect();
+      const area = box.width * box.height;
+      let level = [column];
+      for (let depth = 0; area && depth < 8 && level.length; depth++) {
+        const next = [];
+        for (const el of level) {
+          const r = el.getBoundingClientRect();
+          if (r.width * r.height < area * 0.6) continue;
+          if (solid(el)) want.add(el);
+          next.push(...kids(el));
+        }
+        level = next;
+      }
+    }
     // thin empty strips the full height of the window (a solid seam between the sidebar and the chat)
     for (const el of document.querySelectorAll('body div:empty')) {
       const r = el.getBoundingClientRect();
@@ -213,8 +234,8 @@
     if (glassTimer) return;
     glassTimer = setTimeout(() => {
       glassTimer = 0;
-      try { seeThrough(); } catch (err) { console.warn('prism-themes: see-through pass failed', err); }
       try { glassify(); } catch (err) { console.warn('prism-themes: glass pass failed', err); }
+      try { seeThrough(); } catch (err) { console.warn('prism-themes: see-through pass failed', err); }
     }, 300);
   };
 
