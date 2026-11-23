@@ -131,7 +131,47 @@
       if (panel.getAttribute('data-tfc-panel') !== role) panel.setAttribute('data-tfc-panel', role);
     }
   };
-  const scheduleGlass = () => { if (!glassTimer) glassTimer = setTimeout(glassify, 300); };
+  // The chat column over a background: a large layer that paints it solid (such as a wrapper a desktop update adds
+  // around the conversation) is marked data-tfc-see and made see-through. Judged by size and colour like the panels:
+  // the composer's ancestors that cover a quarter of the window, and the layers that fill most of the content area.
+  const clearSee = () => { for (const el of document.querySelectorAll('[data-tfc-see]')) el.removeAttribute('data-tfc-see'); };
+  const seeThrough = () => {
+    if (!theme || !root.hasAttribute('data-tfc-wall')) { clearSee(); return; }
+    const composer = lastResolved.composer && document.querySelector(lastResolved.composer);
+    const content = lastResolved.content && document.querySelector(lastResolved.content);
+    const solid = el => !el.hasAttribute('data-tfc-panel') && (el.hasAttribute('data-tfc-see') || opaque(el));
+    const want = new Set();
+    const windowArea = innerWidth * innerHeight;
+    for (let el = composer?.parentElement; el && el !== document.body && el !== root; el = el.parentElement) {
+      const r = el.getBoundingClientRect();
+      if (r.width * r.height < windowArea * 0.25) continue;
+      if (solid(el)) want.add(el);
+      // an empty layer laid behind the column (no children: never a dialog or a page with content)
+      for (const sib of el.children) {
+        if (sib.childElementCount || sib.contains(composer)) continue;
+        const s = sib.getBoundingClientRect();
+        if (s.width * s.height >= r.width * r.height * 0.6 && solid(sib)) want.add(sib);
+      }
+    }
+    if (content) {
+      const box = content.getBoundingClientRect();
+      const area = box.width * box.height;
+      let level = [...content.children];
+      for (let depth = 0; area && depth < 8 && level.length; depth++) {
+        const next = [];
+        for (const el of level) {
+          const r = el.getBoundingClientRect();
+          if (r.width * r.height < area * 0.6) continue;
+          if (solid(el)) want.add(el);
+          next.push(...el.children);
+        }
+        level = next;
+      }
+    }
+    for (const el of document.querySelectorAll('[data-tfc-see]')) if (!want.has(el)) el.removeAttribute('data-tfc-see');
+    for (const el of want) if (!el.hasAttribute('data-tfc-see')) el.setAttribute('data-tfc-see', '');
+  };
+  const scheduleGlass = () => { if (!glassTimer) glassTimer = setTimeout(() => { seeThrough(); glassify(); }, 300); };
 
   const appMode = () => {
     const m = root.getAttribute('data-tfc-was-mode') || root.dataset.mode;
@@ -249,6 +289,7 @@
       document.getElementById('prism-theme')?.remove();
       for (const a of ['data-tfc-theme', 'data-tfc-mode', 'data-tfc-wall', 'data-tfc-roles', 'data-tfc-missing', 'data-tfc-panels']) setAttr(a, undefined);
       clearPanels();
+      clearSee();
       showBackground(null);
       mode = undefined;
       syncMode();

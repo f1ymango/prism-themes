@@ -81,13 +81,21 @@ export type ResolveOptions = {
   haloSize?: number
   /** false leaves out the reactions (tool glow, error shake, waiting glow) */
   reactions?: boolean
+  /** the desktop app paints the theme's colours itself ($.theme.set colors), so the page sets no cds-* palette tokens */
+  officialColors?: boolean
 }
 
 /** Theme (or none: Claude's own colours) → payload. Claude's own look with no custom background is `{}`. */
 export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | Record<string, never> => {
   if (!t && !opts.media) return {}
+  // the desktop app paints its own design tokens (cds-*) when it took the theme's colours; the page keeps the rest
+  const palette = (p: Palette) => {
+    const all = varsOf(p)
+    if (opts.officialColors) for (const k of Object.keys(all)) if (k.startsWith('cds-')) delete all[k]
+    return all
+  }
   const vars: Record<string, string> = t
-    ? varsOf(t.palette)
+    ? palette(t.palette)
     // Claude's own colours over a background: a lighter tint than a palette theme's 60%, since the app's own
     // surface colour is close to the dark videos people use, and 62% read as solid there
     : {
@@ -113,8 +121,8 @@ export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | R
   }
   if (mode === 'light') vars['prism-controls'] = t!.palette.text
   const variants = t?.variants && {
-    light: { ...varsOf(t.variants.light), 'prism-controls': t.variants.light.text } as Record<string, string>,
-    dark: varsOf(t.variants.dark) as Record<string, string>,
+    light: { ...palette(t.variants.light), 'prism-controls': t.variants.light.text } as Record<string, string>,
+    dark: palette(t.variants.dark) as Record<string, string>,
   }
   // each variant gets its own background: the light gradient (when the theme has one), and a veil in its own colour
   if (variants && t?.variants) {

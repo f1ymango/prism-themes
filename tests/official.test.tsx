@@ -1,6 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
+import { officialPalette } from '../core/colors'
 import { glassFor, isOlderEngine, sceneName, sceneOf, schemeFor } from '../core/official'
+import { resolve } from '../core/resolve'
+import type { Payload } from '../core/resolve'
+import { makeColors } from '../hooks/make-colors.js'
 import { THEMES } from '../core/themes'
 
 const dusk = THEMES.find(t => t.id === 'dusk')!
@@ -24,17 +28,14 @@ test('official route: scene names, read under scene or id, and which errors mean
   expect(isOlderEngine(new Error('disk full'))).toBe(false)
 })
 
-test('a gradient theme goes to the official backdrop, falling back to the 2.1.319 shape', async ($, on) => {
-  const calls: unknown[] = []
+/** Starts Prism against a mocked engine whose theme.set answers with `answer`; returns the calls it saw. */
+async function startWith($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1],
+  answer: (args: Record<string, unknown>) => { deny: string } | { value: unknown }) {
+  const calls: Record<string, unknown>[] = []
   on('command.register', () => ({ value: { command: 'prism' } }))
-  on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
-  on('clock.now', () => ({ value: Date.UTC(2026, 10, 17, 12) }))
-  on('theme.set', (_, e) => {
-    calls.push(e)
-    const args = e as { overrideColorScheme?: string }
-    if (args.overrideColorScheme) return { deny: 'theme.set does not know the attribute overrideColorScheme' }
-    return { value: { isDrawn: true, requestId: 'backdrop' } }
-  })
+  on('session.version', () => ({ value: { version: '2.1.326', base: '2.1.326' } }))
+  on('clock.now', () => ({ value: Date.UTC(2026, 10, 24, 12) }))
+  on('theme.set', (_, e) => { calls.push(e as Record<string, unknown>); return answer(e as Record<string, unknown>) })
   on('theme.clear', () => ({ value: { isDrawn: false, reason: 'cleared' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.run', () => ({ text: '' }))
@@ -42,13 +43,47 @@ test('a gradient theme goes to the official backdrop, falling back to the 2.1.31
   on('store.get', (_, e) => ({ value: stored.get(e.key) }))
   on('store.set', (_, e) => { stored.set(e.key, e.value); return { value: undefined } })
   for (const n of ['env.get', 'ui.log', 'ui.status', 'ui.toast']) on(n as 'env.get', () => ({ value: undefined }))
-
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  return calls
+}
+
+test('2.1.324+: one theme.set carries the colours and the scene (no id beside it), and the doctor says so', async ($, on) => {
+  const calls = await startWith($, on, () => ({ value: { isDrawn: true, requestId: 'backdrop' } }))
   expect(((await $.command.run({ command: 'prism', args: 'use dusk' })) as { text?: string }).text?.startsWith('Theme: Dusk')).toBe(true)
-  const last = calls.at(-1) as { backdrop: { id: string; glass: unknown; colorScheme?: string } }
-  expect(last.backdrop.id).toBe('prism-gradient-dusk')
-  expect(last.backdrop.colorScheme).toBe('dark')
-  expect(last.backdrop.glass).toEqual({ blur: 14, tint: dusk.palette.bg, opacity: 0.4 })
+  const last = calls.at(-1) as { backdrop: Record<string, unknown>; colors: { v: number; label: string; inputs: Record<string, unknown> }; overrideColorScheme?: string }
+  expect(last.backdrop).toEqual({ scene: 'prism-gradient-dusk', glass: { blur: 14, tint: dusk.palette.bg, opacity: 0.4 } })
+  expect(last.colors.v).toBe(1)
+  expect(last.colors.label).toBe('Dusk')
+  expect(Object.keys(last.colors.inputs)).toEqual(['dark'])
+  expect(last.overrideColorScheme).toBe('dark')
   const doctor = ((await $.command.run({ command: 'prism', args: 'doctor' })) as { text?: string }).text ?? ''
   expect(doctor.includes('official backdrop: drawing')).toBe(true)
+  expect(doctor.includes('official colours: painted by the desktop app')).toBe(true)
+})
+
+test('2.1.323: an engine with no colours gets the backdrop alone, and the page keeps the palette', async ($, on) => {
+  const calls = await startWith($, on, args =>
+    args.colors ? { deny: 'theme.set does not know the attribute colors' } : { value: { isDrawn: true, requestId: 'backdrop' } })
+  await $.command.run({ command: 'prism', args: 'use dusk' })
+  const last = calls.at(-1)!
+  expect(last.colors).toBe(undefined)
+  expect((last.backdrop as { scene: string }).scene).toBe('prism-gradient-dusk')
+  const doctor = ((await $.command.run({ command: 'prism', args: 'doctor' })) as { text?: string }).text ?? ''
+  expect(doctor.includes('official colours: not available')).toBe(true)
+})
+
+test('official colours: every built-in palette passes the check that would stop Desktop painting it', async () => {
+  for (const t of THEMES) {
+    const { theme, refused } = officialPalette(t, makeColors)
+    expect(`${t.id}: ${refused ?? ''}`).toBe(`${t.id}: `)
+    expect(Object.keys(theme!.inputs).sort()).toEqual(t.variants ? ['dark', 'light'] : [schemeFor(t)!])
+  }
+})
+
+test('official colours: the page leaves the palette tokens to the app, and keeps its own', async () => {
+  const both = resolve(dusk, { backgroundByPage: false }) as Payload
+  const app = resolve(dusk, { backgroundByPage: false, officialColors: true }) as Payload
+  expect(both.vars['cds-surface-0']).toBe(dusk.palette.bg)
+  expect(app.vars['cds-surface-0']).toBe(undefined)
+  expect(app.vars['prism-halo']).toBe(dusk.palette.bg)
 })

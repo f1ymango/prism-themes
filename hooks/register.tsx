@@ -1,20 +1,22 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, ThemeColors } from 'claude-code'
 
 import type { Discovery } from '../core/discover'
 import { alertText, describeError, doctorLines, healthFile, partName, record, settle, stripText } from '../core/health'
 import type { HealthLevel, HealthProblem } from '../core/health'
 import type { CustomBackground } from '../core/media'
+import { officialPalette } from '../core/colors'
 import { OFFICIAL_SVG_MAX, glassFor, isOlderEngine, sceneName, sceneOf, schemeFor } from '../core/official'
 import type { Glass } from '../core/official'
 import { slugOf } from '../core/removal'
+import { makeColors } from './make-colors.js'
 import { gradientSvg, resolve } from '../core/resolve'
 import type { Panels, Theme } from '../core/resolve'
 import { pickRule } from '../core/schema'
 import { ALIASES, changedSummary, cleanSettings, describeSettings, findSetting, migrateLegacy, parseValue } from '../core/settings'
 import type { Settings } from '../core/settings'
 import { THEMES } from '../core/themes'
-import type { Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
+import type { ColorsState, Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
   discover, ensureAssets, importV1, inspectBackground, install, loadLibrary, nextPulseN, providerFor, readPayloadId,
   listRemoved, ownThemeId, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
@@ -33,6 +35,7 @@ const custom = atom({ plugin: 'prism-themes', key: 'custom' } as const, null as 
 const panels = atom({ plugin: 'prism-themes', key: 'panels' } as const, 'glass' as Panels)
 const libraryInfo = atom({ plugin: 'prism-themes', key: 'libraryInfo' } as const, null as LibraryInfo | null)
 const health = atom({ plugin: 'prism-themes', key: 'health' } as const, [] as HealthProblem[])
+const colorsState = atom({ plugin: 'prism-themes', key: 'colorsState' } as const, 'page' as ColorsState)
 
 /** Parts of Prism that failed in this session (core/health.ts); a part leaves the list once it works again. */
 const problems: HealthProblem[] = []
@@ -43,6 +46,10 @@ let lastGood: string | undefined
 let backdropSet = false
 /** Which shape of the backdrop call this engine took (core/official.ts), once learnt. */
 let backdropShape: 'scene' | 'nested' | 'older' | undefined
+/** Whether this engine takes `colors` in $.theme.set (2.1.324+), once learnt. */
+let colorsTaken: boolean | undefined
+/** The desktop app paints the theme's colours itself (official route): the page then leaves the palette alone. */
+let colorsPainted = false
 /** A picture background drawn as an official backdrop: its scene name and SVG source, for the Backdrop hook. */
 let officialSvg: { scene: string; source: string } | undefined
 
@@ -94,18 +101,49 @@ type BackdropCalls = {
   ui: { backdrop: (args: unknown) => Promise<BackdropAnswer> }
 }
 
-/** Sets an official backdrop by whichever shape this engine takes, newest first (core/official.ts). */
-async function setOfficialBackdrop($: EngineInterface, scene: string, glass: Glass, scheme: 'light' | 'dark' | undefined): Promise<BackdropAnswer> {
+/** The theme's official colours, or undefined (and a note) when Desktop would refuse the palette. Throws on a bad colour. */
+function officialColors(t: Theme): ThemeColors | undefined {
+  const out = officialPalette(t, makeColors)
+  if (out.refused) throw new Error(`${t.name}'s colours stay with the page: ${out.refused}`)
+  return out.theme
+}
+
+type Look = { colors?: ThemeColors; scene?: string; glass: Glass; scheme?: 'light' | 'dark' }
+
+/**
+ * Sets Prism's look the official way, by whichever shape this engine takes, newest first (core/official.ts):
+ * colours and backdrop in one $.theme.set (a later set or clear wipes both). `colors` says whether colours went in.
+ */
+async function setOfficialLook($: EngineInterface, look: Look): Promise<BackdropAnswer & { colors: boolean }> {
+  const { scene, glass, scheme } = look
+  const none = { isDrawn: false, reason: 'nothing to draw: this Claude Code takes no colours, and the theme has no backdrop', colors: false }
   if (!backdropShape || backdropShape === 'scene') {
-    try {
-      // scene for 2.1.323+, id beside it for the engines before (each drops the member it does not know)
-      const res = await ($ as unknown as BackdropCalls).theme.set({ backdrop: { scene, id: scene, glass }, ...(scheme ? { overrideColorScheme: scheme } : {}) })
-      if (scheme) backdropShape = 'scene'
-      return res
-    } catch (err) {
-      if (!isOlderEngine(err, 'overrideColorScheme')) throw err
+    let colors = colorsTaken === false ? undefined : look.colors
+    for (;;) {
+      if (!colors && !scene) return none
+      try {
+        const res = await ($ as unknown as BackdropCalls).theme.set({
+          ...(scene ? { backdrop: { scene, glass } } : {}),
+          ...(colors ? { colors } : {}),
+          ...(scheme ? { overrideColorScheme: scheme } : {}),
+        })
+        backdropShape = 'scene'
+        if (colors) colorsTaken = true
+        return { ...res, colors: !!colors }
+      } catch (err) {
+        // 2.1.323: no colours yet; try again with the backdrop alone
+        if (colors && isOlderEngine(err, 'colors')) { colorsTaken = false; colors = undefined; continue }
+        if (!isOlderEngine(err, 'overrideColorScheme') && !isOlderEngine(err, 'scene')) throw err
+        break
+      }
     }
   }
+  if (!scene) return none
+  return { ...(await setOlderBackdrop($, scene, glass, scheme)), colors: false }
+}
+
+/** The backdrop call before 2.1.323: { id, glass, colorScheme } in $.theme.set, or $.ui.backdrop before that. */
+async function setOlderBackdrop($: EngineInterface, scene: string, glass: Glass, scheme: 'light' | 'dark' | undefined): Promise<BackdropAnswer> {
   if (!backdropShape || backdropShape === 'nested') {
     try {
       const res = await ($ as unknown as BackdropCalls).theme.set({ backdrop: { id: scene, glass, ...(scheme ? { colorScheme: scheme } : {}) } })
@@ -128,6 +166,13 @@ async function clearOfficialBackdrop($: EngineInterface) {
     if (!isOlderEngine(err)) throw err
     await ($ as unknown as BackdropCalls).ui.backdrop(undefined)
   }
+}
+
+const COLORS_TEXT: Record<ColorsState, string> = {
+  painted: 'painted by the desktop app',
+  page: 'painted by the page (extension)',
+  older: 'not available: this Claude Code is older than 2.1.324, so the page paints them',
+  undrawn: 'sent, but no desktop client drew them',
 }
 
 const failure = (part: string) => problems.find(p => p.part === part)?.detail ?? 'unknown error'
@@ -218,6 +263,7 @@ async function payloadFor($: EngineInterface, id: string, slot: string) {
     composerBlur: num(s, 'composer.blur'),
     haloSize: num(s, 'text.halo'),
     reactions: choice(s, 'reactions') !== 'off',
+    officialColors: colorsPainted && t?.id === (await read($, current)),
     backgroundByPage: !!t?.background && !t1?.isDrawn,
     // a picture the desktop app draws itself (the official route) is not drawn again by the page
     media: bg && files.length && !(officialSvg && t1?.isDrawn)
@@ -253,17 +299,27 @@ async function applyTheme($: EngineInterface, id: string) {
   } else if (!bg && t?.background) {
     scene = sceneName('gradient', t.id)
   }
-  if (scene) {
+  // the theme's palette as the desktop app's own colours (2.1.324+); a palette Desktop would refuse stays with the page
+  colorsPainted = false
+  const colors = t && colorsTaken !== false ? await guard($, 'colors', async () => officialColors(t), 'note') : undefined
+  if (scene || colors) {
     const s = await loadSettings($)
     const glass = glassFor(t, { panels: choice(s, 'panels.style') as Panels | undefined, panelTint: num(s, 'panels.tint'), panelBlur: num(s, 'panels.blur') })
-    const res = await guard($, 'backdrop', () => setOfficialBackdrop($, scene!, glass, schemeFor(t)), 'note')
-    if (res) backdropSet = true
+    const res = await guard($, 'backdrop', () => setOfficialLook($, { colors, scene, glass, scheme: schemeFor(t) }), 'note')
+    if (res && (res.isDrawn || res.colors)) backdropSet = true
+    colorsPainted = !!res?.isDrawn && res.colors
     await update($, tier1, () => (!res ? { isDrawn: false, reason: `this Claude Code could not set one: ${failure('backdrop')}` }
+      : !scene ? { isDrawn: false, reason: 'the theme has no backdrop the app can draw' }
       : res.isDrawn ? { isDrawn: true } : { isDrawn: false, reason: res.reason }))
-  } else if (backdropSet) {
-    // only a backdrop Prism set: $.theme.clear would also wipe another plugin's
-    await guard($, 'backdrop', () => clearOfficialBackdrop($), 'note')
-    backdropSet = false
+    const state: ColorsState = colorsPainted ? 'painted' : colorsTaken === false ? 'older' : colors && res?.colors && !res.isDrawn ? 'undrawn' : 'page'
+    await update($, colorsState, () => state)
+  } else {
+    await update($, colorsState, () => (t && colorsTaken === false ? 'older' : 'page'))
+    if (backdropSet) {
+      // only a look Prism set: $.theme.clear would also wipe another plugin's
+      await guard($, 'backdrop', () => clearOfficialBackdrop($), 'note')
+      backdropSet = false
+    }
   }
   const t2 = await read($, tier2)
   if (tier2Ready(t2)) await writePayload($, t2.slot, await payloadFor($, t ? t.id : 'claude', t2.slot))
@@ -344,6 +400,7 @@ async function doctor($: EngineInterface): Promise<string> {
     'Claude Desktop',
     ...discovery.evidence.map(e => `  ${e}`),
     `  official backdrop: ${!t1 ? 'not tried yet' : t1.isDrawn ? 'drawing' : `unavailable (${t1.reason ?? '?'})`}`,
+    `  official colours: ${COLORS_TEXT[await read($, colorsState)]}${problems.some(p => p.part === 'colors') ? ` (${failure('colors')})` : ''}`,
     `  extension: ${t2?.state ?? 'unknown'}${t2?.slot ? ` at ${t2.slot}` : ''}`,
     '',
     `Your themes: ${library.dir ? `${library.dir}\\themes` : 'no home folder'}`,

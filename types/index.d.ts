@@ -29,6 +29,8 @@ export type LibraryInfo = {
   ruleUse?: string
 }
 
+export type ColorsState = 'painted' | 'page' | 'older' | 'undrawn'
+
 declare module 'claude-code' {
   interface PluginState {
     'prism-themes': {
@@ -42,6 +44,8 @@ declare module 'claude-code' {
       panels: 'glass' | 'clear' | 'solid'
       libraryInfo: LibraryInfo | null
       health: Health[]
+      /** Who paints the theme's colours: the desktop app (painted), the page, an engine with no colours (older), or a set no client drew (undrawn). */
+      colorsState: ColorsState
     }
   }
 }

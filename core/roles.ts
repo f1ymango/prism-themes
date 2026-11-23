@@ -45,6 +45,8 @@ export const WALL_RULES: RoleRule[] = [
       'html[data-tfc-wall] body { background: transparent !important; }\n' +
       'html[data-tfc-wall] * { --cds-page-bg: transparent !important; --epitaxy-transcript-surface: transparent !important; }',
   },
+  // solid layers in the chat column that no role names; the page marks them by size and colour (data-tfc-see)
+  { id: 'wall-see', roles: [], css: 'html[data-tfc-wall] [data-tfc-see] { background-color: transparent !important; background-image: none !important; }' },
   { id: 'wall-content', roles: ['content'], css: 'html[data-tfc-wall] @{content} { background: transparent !important; }' },
   { id: 'wall-tiles', roles: ['tiles'], css: 'html[data-tfc-wall] @{tiles} { background: transparent !important; }' },
   { id: 'wall-grid', roles: ['grid'], css: 'html[data-tfc-wall] @{grid} { background: transparent !important; }' },

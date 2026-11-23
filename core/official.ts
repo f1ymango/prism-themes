@@ -2,7 +2,9 @@
 // Prism sends everything that route can carry through it, and keeps the extension for the rest (picture and video
 // backgrounds, fonts, corners, stylesheets, reactions). The engine's call has had three shapes so far, and an older
 // Claude Code keeps working:
-//   2.1.323+  $.theme.set({ backdrop: { scene, glass }, overrideColorScheme })
+//   2.1.324+  $.theme.set({ colors, backdrop: { scene, glass }, overrideColorScheme })  (2.1.326 refuses any other key
+//             in a scene, such as the `id` Prism used to send beside it)
+//   2.1.323   $.theme.set({ backdrop: { scene, glass }, overrideColorScheme })
 //   2.1.319+  $.theme.set({ backdrop: { id, glass, colorScheme } })
 //   earlier   $.ui.backdrop({ id, glass })
 // Same approach as Anthropic's theme-examples plugin: try the newest shape, and fall back only when the engine says it
@@ -41,5 +43,5 @@ export function isOlderEngine(err: unknown, member?: string): boolean {
   return /does not know the attribute|is not a function/i.test(text) || (!!member && text.includes(member))
 }
 
-/** An official SVG backdrop is used for a picture only up to this size; larger ones stay with the extension. */
-export const OFFICIAL_SVG_MAX = 512 * 1024
+/** An official SVG backdrop is used for a picture only up to this size (the engine's limit is 131,072 characters). */
+export const OFFICIAL_SVG_MAX = 131_072

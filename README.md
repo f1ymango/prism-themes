@@ -74,19 +74,22 @@ Then, in a Code session in Claude Desktop:
 
 ## How it draws
 
-| | Official backdrop | Extension (optional) |
+| | Official route | Extension (optional) |
 | --- | --- | --- |
 | How | Claude Code's own theme API, `$.theme.set`, the same route as Anthropic's `theme-examples` plugin | a content script in the app's React DevTools extension slot, loaded when `REACT_PROFILE=1` |
-| What | gradient backgrounds and SVG backgrounds up to 512 KB, the app's own panel glass (from `panels.style`, `panels.tint` and `panels.blur`), and the light or dark hint | colours, fonts, corners, stylesheets, reactions; picture, slideshow and video backgrounds |
-| Needs | a Claude Desktop that draws backdrops | one install and a restart |
+| What | the theme's colours, gradient backgrounds and SVG backgrounds up to 128 KB, the app's own panel glass (from `panels.style`, `panels.tint` and `panels.blur`), and the light or dark hint | fonts, corners, stylesheets, reactions; picture, slideshow and video backgrounds; colours where the official route can't paint them |
+| Needs | a Claude Desktop that draws themes | one install and a restart |
 
-Prism sends everything the official route can carry through it first. The extension draws only what that route
-cannot, or what this app version does not draw yet, and the strip says which route is in use. Every shape of the
-official call so far is supported: `scene` with `overrideColorScheme` (Claude Code 2.1.323 and later), `id` with
-`colorScheme` (2.1.319 and later), and `$.ui.backdrop` (earlier).
+Prism sends everything the official route can carry through it first, colours and backdrop in one call. The extension
+draws only what that route cannot, or what this app version does not draw yet, and `/prism doctor` says which route
+paints the colours and the backdrop.
 
-Official colours (`$.theme.set({ colors })`, Claude Code 2.1.324 and later) come next. Until then, the extension
-paints the palette.
+- **Colours** (Claude Code 2.1.324 and later) are built with Anthropic's `makeColors` helper
+  (`hooks/make-colors.js`, copied unchanged from Claude Code's plugin-authoring skill), so the app works out every
+  surface, border and fill from the theme's palette. When Desktop would refuse a palette for low contrast, Prism raises
+  the secondary and muted text until it is accepted; if none is, the extension keeps painting that theme's colours.
+- **Backdrops**: every shape of the call so far is supported: `scene` with `overrideColorScheme` (2.1.323 and later),
+  `id` with `colorScheme` (2.1.319 and later), and `$.ui.backdrop` (earlier).
 
 ## Commands
 

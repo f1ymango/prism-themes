@@ -21,6 +21,7 @@ export const PARTS: Record<string, string> = {
   library: 'reading your themes',
   apply: 'applying and switching themes',
   backdrop: 'the official backdrop',
+  colors: 'the official colours',
   events: 'reacting to what Claude does',
   install: 'installing or removing the extension',
   settings: 'changing settings',
