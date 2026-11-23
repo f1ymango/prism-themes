@@ -29,7 +29,7 @@ export type LibraryInfo = {
   ruleUse?: string
 }
 
-export type ColorsState = 'painted' | 'page' | 'older' | 'undrawn'
+export type ColorsState = 'painted' | 'sent' | 'page' | 'older'
 
 declare module 'claude-code' {
   interface PluginState {
@@ -44,7 +44,7 @@ declare module 'claude-code' {
       panels: 'glass' | 'clear' | 'solid'
       libraryInfo: LibraryInfo | null
       health: Health[]
-      /** Who paints the theme's colours: the desktop app (painted), the page, an engine with no colours (older), or a set no client drew (undrawn). */
+      /** The theme's colours: drawn by the desktop app here (painted), taken by Claude Code for the app to draw when it shows this session (sent), painted by the page (page), or an engine with no colours (older). */
       colorsState: ColorsState
     }
   }

@@ -193,6 +193,9 @@
     return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   };
 
+  // cds-* tokens that are Prism's own choices rather than palette colours (fonts, corners): the page keeps them
+  const PAGE_TOKENS = /^cds-(font|radius|panel-radius)/;
+
   // C4: resolve roles against the page now; rebuild the stylesheet only when that changes.
   const paint = force => {
     if (!theme) return;
@@ -201,7 +204,9 @@
     // a theme with light and dark variants follows the app's own mode (it never forces one)
     const variant = theme.variants ? appMode() : '';
     if (theme.variants) setAttr('data-tfc-mode', variant);
-    const key = resolvedKey(resolved) + (bgReady ? '|bg' : '') + '|' + variant;
+    // the app paints Prism's palette itself (official colours): leave its cds-* tokens to it
+    const appPaints = !!theme.officialColors && document.documentElement.getAttribute('data-cds-theme') === 'mod-palette';
+    const key = resolvedKey(resolved) + (bgReady ? '|bg' : '') + '|' + variant + (appPaints ? '|app' : '');
     setAttr('data-tfc-wall', wallReady(resolved) && (!theme.background || bgReady) ? '' : undefined);
     scheduleGlass();
     if (!force && key === rolesKey) return;
@@ -211,7 +216,7 @@
     setAttr('data-tfc-missing', REQUIRED.filter(k => !resolved[k]).join(' ') || undefined);
     const { css: ruleCss, dropped } = compileRules(theme.rules || [], resolved);
     const vars = { ...(theme.vars || {}), ...((theme.variants && theme.variants[variant]) || {}) };
-    const decl = Object.entries(vars).filter(([k, v]) => okVar(k, v) || (console.warn('prism-themes: var refused', k), false))
+    const decl = Object.entries(vars).filter(([k]) => !(appPaints && k.startsWith('cds-') && !PAGE_TOKENS.test(k))).filter(([k, v]) => okVar(k, v) || (console.warn('prism-themes: var refused', k), false))
       .map(([k, v]) => `--${k}: ${v} !important;`).join(' ');
     const extra = [theme.css || '', ruleCss].join('\n');
     const css = safe(extra) ? extra : (console.warn('prism-themes: stylesheet refused'), '');
@@ -413,7 +418,7 @@
     if (queued) return;
     queued = true;
     requestAnimationFrame(() => { queued = false; paint(false); if (mode) syncMode(); });
-  }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-mode'] });
+  }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-mode', 'data-cds-theme'] });
 
   tickTheme();
   setInterval(tickTheme, 1000);

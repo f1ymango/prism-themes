@@ -61,6 +61,13 @@ test('2.1.324+: one theme.set carries the colours and the scene (no id beside it
   expect(doctor.includes('official colours: painted by the desktop app')).toBe(true)
 })
 
+test('a session the desktop app is not showing: colours are sent, and the doctor says the app paints them when shown', async ($, on) => {
+  await startWith($, on, () => ({ value: { isDrawn: false, requestId: 'theme', reason: 'no attached desktop client' } }))
+  await $.command.run({ command: 'prism', args: 'use dusk' })
+  const doctor = ((await $.command.run({ command: 'prism', args: 'doctor' })) as { text?: string }).text ?? ''
+  expect(doctor.includes('official colours: sent to the desktop app')).toBe(true)
+})
+
 test('2.1.323: an engine with no colours gets the backdrop alone, and the page keeps the palette', async ($, on) => {
   const calls = await startWith($, on, args =>
     args.colors ? { deny: 'theme.set does not know the attribute colors' } : { value: { isDrawn: true, requestId: 'backdrop' } })
@@ -80,10 +87,11 @@ test('official colours: every built-in palette passes the check that would stop 
   }
 })
 
-test('official colours: the page leaves the palette tokens to the app, and keeps its own', async () => {
+test('official colours: the payload keeps the palette for the page and says it was also sent to the app', async () => {
   const both = resolve(dusk, { backgroundByPage: false }) as Payload
   const app = resolve(dusk, { backgroundByPage: false, officialColors: true }) as Payload
-  expect(both.vars['cds-surface-0']).toBe(dusk.palette.bg)
-  expect(app.vars['cds-surface-0']).toBe(undefined)
+  expect(both.officialColors).toBe(undefined)
+  expect(app.officialColors).toBe(true)
+  expect(app.vars['cds-surface-0']).toBe(dusk.palette.bg) // the page drops it only while the app shows a mod palette
   expect(app.vars['prism-halo']).toBe(dusk.palette.bg)
 })

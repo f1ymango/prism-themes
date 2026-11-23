@@ -48,8 +48,8 @@ let backdropSet = false
 let backdropShape: 'scene' | 'nested' | 'older' | undefined
 /** Whether this engine takes `colors` in $.theme.set (2.1.324+), once learnt. */
 let colorsTaken: boolean | undefined
-/** The desktop app paints the theme's colours itself (official route): the page then leaves the palette alone. */
-let colorsPainted = false
+/** The engine took the theme's colours ($.theme.set colors): the page leaves its palette tokens to the app while the app shows them. */
+let colorsSent = false
 /** A picture background drawn as an official backdrop: its scene name and SVG source, for the Backdrop hook. */
 let officialSvg: { scene: string; source: string } | undefined
 
@@ -172,7 +172,7 @@ const COLORS_TEXT: Record<ColorsState, string> = {
   painted: 'painted by the desktop app',
   page: 'painted by the page (extension)',
   older: 'not available: this Claude Code is older than 2.1.324, so the page paints them',
-  undrawn: 'sent, but no desktop client drew them',
+  sent: 'sent to the desktop app, which paints them while it shows this session (the page steps aside then)',
 }
 
 const failure = (part: string) => problems.find(p => p.part === part)?.detail ?? 'unknown error'
@@ -263,7 +263,7 @@ async function payloadFor($: EngineInterface, id: string, slot: string) {
     composerBlur: num(s, 'composer.blur'),
     haloSize: num(s, 'text.halo'),
     reactions: choice(s, 'reactions') !== 'off',
-    officialColors: colorsPainted && t?.id === (await read($, current)),
+    officialColors: colorsSent && t?.id === (await read($, current)),
     backgroundByPage: !!t?.background && !t1?.isDrawn,
     // a picture the desktop app draws itself (the official route) is not drawn again by the page
     media: bg && files.length && !(officialSvg && t1?.isDrawn)
@@ -300,18 +300,18 @@ async function applyTheme($: EngineInterface, id: string) {
     scene = sceneName('gradient', t.id)
   }
   // the theme's palette as the desktop app's own colours (2.1.324+); a palette Desktop would refuse stays with the page
-  colorsPainted = false
+  colorsSent = false
   const colors = t && colorsTaken !== false ? await guard($, 'colors', async () => officialColors(t), 'note') : undefined
   if (scene || colors) {
     const s = await loadSettings($)
     const glass = glassFor(t, { panels: choice(s, 'panels.style') as Panels | undefined, panelTint: num(s, 'panels.tint'), panelBlur: num(s, 'panels.blur') })
     const res = await guard($, 'backdrop', () => setOfficialLook($, { colors, scene, glass, scheme: schemeFor(t) }), 'note')
     if (res && (res.isDrawn || res.colors)) backdropSet = true
-    colorsPainted = !!res?.isDrawn && res.colors
+    colorsSent = !!res?.colors
     await update($, tier1, () => (!res ? { isDrawn: false, reason: `this Claude Code could not set one: ${failure('backdrop')}` }
       : !scene ? { isDrawn: false, reason: 'the theme has no backdrop the app can draw' }
       : res.isDrawn ? { isDrawn: true } : { isDrawn: false, reason: res.reason }))
-    const state: ColorsState = colorsPainted ? 'painted' : colorsTaken === false ? 'older' : colors && res?.colors && !res.isDrawn ? 'undrawn' : 'page'
+    const state: ColorsState = colorsSent ? res!.isDrawn ? 'painted' : 'sent' : colorsTaken === false ? 'older' : 'page'
     await update($, colorsState, () => state)
   } else {
     await update($, colorsState, () => (t && colorsTaken === false ? 'older' : 'page'))

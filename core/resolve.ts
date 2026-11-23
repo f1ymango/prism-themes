@@ -47,6 +47,11 @@ export type Payload = {
   panels?: Panels
   /** light and dark colour variables: the page picks by the app's own mode and lays them over `vars` */
   variants?: { light: Record<string, string>; dark: Record<string, string> }
+  /**
+   * Prism sent this palette to the desktop app too ($.theme.set colors). The page then leaves the cds-* palette
+   * tokens to the app while the app shows a mod palette (html[data-cds-theme=mod-palette]), and sets them otherwise.
+   */
+  officialColors?: true
 }
 
 export type Panels = 'glass' | 'clear' | 'solid'
@@ -81,19 +86,14 @@ export type ResolveOptions = {
   haloSize?: number
   /** false leaves out the reactions (tool glow, error shake, waiting glow) */
   reactions?: boolean
-  /** the desktop app paints the theme's colours itself ($.theme.set colors), so the page sets no cds-* palette tokens */
+  /** Prism sent the theme's colours to the desktop app too ($.theme.set colors); see Payload.officialColors */
   officialColors?: boolean
 }
 
 /** Theme (or none: Claude's own colours) → payload. Claude's own look with no custom background is `{}`. */
 export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | Record<string, never> => {
   if (!t && !opts.media) return {}
-  // the desktop app paints its own design tokens (cds-*) when it took the theme's colours; the page keeps the rest
-  const palette = (p: Palette) => {
-    const all = varsOf(p)
-    if (opts.officialColors) for (const k of Object.keys(all)) if (k.startsWith('cds-')) delete all[k]
-    return all
-  }
+  const palette = varsOf
   const vars: Record<string, string> = t
     ? palette(t.palette)
     // Claude's own colours over a background: a lighter tint than a palette theme's 60%, since the app's own
@@ -165,6 +165,7 @@ export const resolve = (t: Theme | undefined, opts: ResolveOptions): Payload | R
     // the person's own /prism panels choice wins over the theme's default
     panels: opts.media || gradient ? opts.panels ?? t?.panels ?? 'glass' : undefined,
     variants,
+    ...(t && opts.officialColors ? { officialColors: true as const } : {}),
   }
 }
 
