@@ -3,7 +3,7 @@
 Prism has two desktop integrations:
 
 - **[ChatGPT/Codex on Windows](platforms/chatgpt-windows/README.md):** local image and looping video wallpapers, with matching translucent panels, accent colour, font and corner shape. This engineering preview is verified in the Codex view of the `OpenAI.Codex` Windows app.
-- **Claude Desktop:** colours, fonts, corner shapes, and picture, slideshow or video backgrounds for the Code tab. Themes can follow light/dark mode, inherit from each other, and switch by project folder or time of day.
+- **Claude Desktop (on hiatus, see below):** colours, fonts, corner shapes, and picture, slideshow or video backgrounds for the Code tab. Themes can follow light/dark mode, inherit from each other, and switch by project folder or time of day.
 
 The integrations have different installation steps and theme formats. Wallpaper Engine `.mp4` files work in both.
 
@@ -14,6 +14,13 @@ the app through its React DevTools extension slot it builds on.
 > **Unofficial.** Both integrations use app internals that can change after an update. The Codex integration checks
 > unfamiliar builds in an isolated profile; on Claude Desktop, Prism tells you when an update breaks part of it (see
 > [When an update breaks something](#when-an-update-breaks-something)).
+
+> **Claude Desktop integration on hiatus (November 2026).** Claude Desktop 6.28899 no longer loads the React
+> DevTools extension slot that Prism's page script used, and now loads only extensions that match the Chrome Web
+> Store's signed list. Video, picture and slideshow backgrounds, fonts, theme stylesheets, reactions and panel glass
+> no longer work on current versions. What remains is what Claude Code's official theme API draws: palette colours,
+> and gradient or small SVG backgrounds. Prism will not try to get around the new check. Development is paused until
+> a supported route exists; the Codex integration is unaffected.
 
 ## Claude Desktop demos
 
