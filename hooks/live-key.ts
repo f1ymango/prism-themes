@@ -7,9 +7,9 @@
 // A block is se(DC change), ue(n <= 15), then n x (ue(zero run), se(level)) in zigzag order.
 // Decoding: once every word is in, `B` finds where each block starts (each slice walks its blocks in parallel, 4 a
 // frame). Then 12 frames each decode one band of 64 picture rows: `K` takes each block's (up to 16) coefficients out
-// of the stream, `lumaBand`/`chromaBand` rebuild the band's pixels straight from them, and `pic` keeps the band. Every
+// of the stream, `bands` rebuilds the band's pixels straight from them, and `pic` keeps the band. Every
 // pass is small but `pic`, which only copies. Until a band is in, the window shows the Svg's flat colour there.
-import { buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, still, table, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
+import { abs, buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, still, table, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
 
 // /prism livedebug: 1 draws the decoder's progress over the top of the window
 const v = values({ debug: [0, 1] })
@@ -51,12 +51,16 @@ const ready: Buffer = buffer({ size: [1, 1], float: 32, filter: 'nearest' }, () 
   const marks = signed(at(0)) === 5263948 && signed(at(8)) === 4932953
   return vec4(n > WORDS - 0.5 && marks ? 1 : 0, n, 0, 1)
 })
-// x: 0 until every block is placed, then 1..12 = decoding band x - 1 this frame, 13 = done (it stays)
+// x: 0 until every block is placed, then 1..12 = decoding band x - 1 (2..13 also deblock window x - 2), 14 = done (it stays)
 const stage: Buffer = buffer({ size: [1, 1], float: 32, filter: 'nearest' }, () => {
   const s = stage.at(vec2(0, 0)).x
-  return vec4(s > BANDS + 0.5 ? s : placed.at(vec2(0, 0)).x > 0.5 ? s + 1 : 0, 0, 0, 1)
+  if (s > BANDS + 1.5) return vec4(s, 0, 0, 1)
+  // every slice's last block known
+  let all = 1
+  for (const sl of range(192)) all = all * B.at(vec2(sl < 96 ? 159 : 79, sl)).z
+  return vec4(all > 0.5 && going() ? s + 1 : 0, 0, 0, 1)
 })
-const done = () => stage.at(vec2(0, 0)).x > BANDS + 0.5
+const done = () => stage.at(vec2(0, 0)).x > BANDS + 1.5
 const band = () => stage.at(vec2(0, 0)).x - 1
 
 // --- the bit stream -----------------------------------------------------------------------------------------------
@@ -146,14 +150,12 @@ const B: Buffer = buffer({ size: [160, 192], float: 32, filter: 'nearest', repea
   const e = blockEnd(prev.x, prev.y)
   return vec4(e.x, e.y, 1, 1)
 })
-// x: 1 once every slice's last block is known
-const placed: Buffer = buffer({ size: [1, 1], float: 32, filter: 'nearest' }, () => {
-  let all = 1
-  for (const sl of range(192)) all = all * B.at(vec2(sl < 96 ? 159 : 79, sl)).z
-  return vec4(all > 0.5 && going() ? 1 : 0, 0, 0, 1)
-})
 const S = () => signed(at(9)) / 4096
-const decoding = () => stage.at(vec2(0, 0)).x > 0.5 && !done()
+const decoding = () => stage.at(vec2(0, 0)).x > 0.5 && stage.at(vec2(0, 0)).x < BANDS + 0.5
+// deblocking trails the decode by a frame: window w = stage - 2 covers picture rows 64w - 4 .. 64w + 59, which hold
+// whole edge neighbourhoods (4 rows each side of every 8th row), so a window needs no rows from outside itself
+const deblocking = () => stage.at(vec2(0, 0)).x > 1.5 && !done()
+const win = () => stage.at(vec2(0, 0)).x - 2
 
 // this frame's band, per block: 16 entries, entry i at x = block * 8 + i % 8, y = row * 2 + floor(i / 8), where
 // rows 0-7 are Y block rows, 8-11 Co, 12-15 Cg (a side holds at most 2048).
@@ -182,16 +184,16 @@ function rebuild(k: number, bx: number, xi: number, yi: number, chroma: boolean)
   }
   return s * S() + 128
 }
-// this frame's band of the picture: 1280 x 64 luma, 640 x 32 chroma (row 0 at the top: y = rows - 1 - cell.y)
-const lumaBand: Buffer = buffer({ size: [1280, 64], float: 16, filter: 'nearest' }, q => {
+// this frame's band of the picture: cell.y 32..95 luma (1280 x 64, row rr at 95 - rr), 0..31 chroma (640 x 32, row y at 31 - y)
+const bands: Buffer = buffer({ size: [1280, 96], float: 16, filter: 'nearest' }, q => {
   if (!decoding()) return vec4(0)
-  const rr = 63 - q.cell.y
-  const bx = floor(q.cell.x / 8)
-  const by = floor(rr / 8)
-  return vec4(rebuild(by, bx, q.cell.x - bx * 8, rr - by * 8, false), 0, 0, 1)
-})
-const chromaBand: Buffer = buffer({ size: [640, 32], float: 16, filter: 'nearest' }, q => {
-  if (!decoding()) return vec4(0)
+  if (q.cell.y > 31.5) {
+    const rr = 95 - q.cell.y
+    const bx = floor(q.cell.x / 8)
+    const by = floor(rr / 8)
+    return vec4(rebuild(by, bx, q.cell.x - bx * 8, rr - by * 8, false), 0, 0, 1)
+  }
+  if (q.cell.x > 639.5) return vec4(0)
   const rr = 31 - q.cell.y
   const bx = floor(q.cell.x / 8)
   const by = floor(rr / 8)
@@ -199,15 +201,69 @@ const chromaBand: Buffer = buffer({ size: [640, 32], float: 16, filter: 'nearest
   const yi = rr - by * 8
   return vec4(rebuild(8 + by, bx, xi, yi, true), rebuild(12 + by, bx, xi, yi, true), 0, 1)
 })
-const chromaAt = (x: number, y: number) => chromaBand.at(vec2(x, 31 - y)).xy
+const chromaAt = (x: number, y: number) => bands.at(vec2(x, 31 - y)).xy
+// --- deblocking, a window a frame -------------------------------------------------------------------------------------
+// The 8x8 blocks show as steps at their edges. Across each edge (luma every 8 pixels, chroma every 16), a step smaller
+// than a real edge is ramped out over 4 pixels each side where both blocks are flat, or eased at the two edge pixels
+// where they are not. Thresholds follow the quantiser (a luma DC step is 2 * s levels). `dbH` does the columns of
+// this frame's window (read from `pic` as last frame left it, still raw there), `dbV` the rows, and `pic` keeps it.
+const ycc = (c: vec3) => vec3((c.r + 2 * c.g + c.b) * 63.75, (c.r - c.b) * 127.5, (2 * c.g - c.r - c.b) * 63.75)
+function deb(p3: number, p2: number, p1: number, p0: number, q0: number, q1: number, q2: number, q3: number, k: number, a: number, bt: number, tc: number): number {
+  const self = k < -3.5 ? p3 : k < -2.5 ? p2 : k < -1.5 ? p1 : k < -0.5 ? p0 : k < 0.5 ? q0 : k < 1.5 ? q1 : k < 2.5 ? q2 : q3
+  const d = q0 - p0
+  const flat = max(max(max(abs(p2 - p3), abs(p1 - p2)), max(abs(p0 - p1), abs(q1 - q0))), max(abs(q2 - q1), abs(q3 - q2)))
+  const off = k < 0 ? (2 * (k + 4) + 1) / 16 : 0 - (2 * (3 - k) + 1) / 16
+  const dl = clamp((d * 4 + p1 - q1 + 4) / 8, 0 - tc, tc)
+  const weak = k > -1.5 && k < 0.5 ? (k < -0.5 ? p0 + dl : q0 - dl) : self
+  return abs(d) >= a ? self : flat < bt ? self + d * off : weak
+}
+// one line of 8 YCoCg pixels across an edge, filtered at offset k (-4..3); chroma only on its own (16 px) edges
+function debLine(t0: vec3, t1: vec3, t2: vec3, t3: vec3, t4: vec3, t5: vec3, t6: vec3, t7: vec3, k: number, chroma: number): vec3 {
+  const ql = S() * 2
+  const qc = S() * 2.125
+  const y = deb(t0.x, t1.x, t2.x, t3.x, t4.x, t5.x, t6.x, t7.x, k, ql * 4, ql * 1.5, ql)
+  const self = k < -3.5 ? t0 : k < -2.5 ? t1 : k < -1.5 ? t2 : k < -0.5 ? t3 : k < 0.5 ? t4 : k < 1.5 ? t5 : k < 2.5 ? t6 : t7
+  const o = chroma > 0.5 ? deb(t0.y, t1.y, t2.y, t3.y, t4.y, t5.y, t6.y, t7.y, k, qc * 4, qc * 1.5, qc) : self.y
+  const g = chroma > 0.5 ? deb(t0.z, t1.z, t2.z, t3.z, t4.z, t5.z, t6.z, t7.z, k, qc * 4, qc * 1.5, qc) : self.z
+  return vec3(y, o, g)
+}
+// window row wr (0 at the top, y = 63 - cell.y) is picture row 64w - 4 + wr, at pic y = CH - 1 - that
+const dbH: Buffer = buffer({ size: [1280, 64], float: 16, filter: 'nearest' }, q => {
+  if (!deblocking()) return vec4(0)
+  const py = CH - 1 - clamp(win() * 64 - 4 + 63 - q.cell.y, 0, PH - 1)
+  const m = mod(q.cell.x, 8)
+  const k = m < 3.5 ? m : m - 8
+  const e = q.cell.x - k
+  const tap = (i: number) => ycc(pic.at(vec2(clamp(e + i, 0, 1279), py)).rgb)
+  if (e < 0.5 || e > 1279.5) return vec4(ycc(pic.at(vec2(q.cell.x, py)).rgb), 1)
+  return vec4(debLine(tap(-4), tap(-3), tap(-2), tap(-1), tap(0), tap(1), tap(2), tap(3), k, mod(e, 16) < 0.5 ? 1 : 0), 1)
+})
+const dbV: Buffer = buffer({ size: [1280, 64], filter: 'nearest' }, q => {
+  if (!deblocking()) return vec4(0)
+  const wr = 63 - q.cell.y
+  const r = win() * 64 - 4 + wr
+  const m = mod(r, 8)
+  const k = m < 3.5 ? m : m - 8
+  const e = r - k
+  // the edge's 8 rows, all inside this window
+  const tap = (i: number) => dbH.at(vec2(q.cell.x, q.cell.y + k - i)).xyz
+  const c = e < 0.5 || e > PH - 0.5 ? dbH.at(q.cell).xyz : debLine(tap(-4), tap(-3), tap(-2), tap(-1), tap(0), tap(1), tap(2), tap(3), k, mod(e, 16) < 0.5 ? 1 : 0)
+  return vec4(clamp(vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z) / 255, 0, 1), 1)
+})
+
 // the picture, painted a band a frame and kept (alpha 1 where painted)
 const pic: Buffer = buffer({ size: [1280, 768], filter: 'linear', wrap: 'clamp' }, q => {
   const old = pic.at(q.cell)
-  if (!decoding()) return stage.at(vec2(0, 0)).x < 0.5 ? vec4(0) : old
+  if (stage.at(vec2(0, 0)).x < 0.5) return vec4(0)
+  if (done()) return old
+  // last frame's band, deblocked (its window ends 4 rows above this frame's band)
+  const wr = CH - 1 - q.cell.y - (win() * 64 - 4)
+  if (deblocking() && wr > -0.5 && wr < 63.5) return vec4(dbV.at(vec2(q.cell.x, 63 - wr)).rgb, 1)
+  if (!decoding()) return old
   const t = band()
   const rr = CH - 1 - q.cell.y - t * 64
   if (rr < -0.5 || rr > 63.5) return old
-  const yv = lumaBand.at(vec2(q.cell.x, 63 - rr)).x
+  const yv = bands.at(vec2(q.cell.x, 95 - rr)).x
   // chroma sits between luma pixels: blend the four nearest, within this band
   const cx = clamp((q.cell.x + 0.5) / 2 - 0.5, 0, 639)
   const cy = clamp((rr + 0.5) / 2 - 0.5, 0, 31)
@@ -253,7 +309,7 @@ const sway: Buffer = buffer({ size: [24, 14], float: 16, filter: 'linear', wrap:
 
 export default shader({
   fps: 30,
-  passes: [acc, seen8, ready, stage, B, placed, K, lumaBand, chromaBand, pic, sway, picture(q => {
+  passes: [acc, seen8, ready, stage, B, K, bands, dbH, dbV, pic, sway, picture(q => {
     const pa = signed(at(5)) / 1000000
     const a = pa > 0.1 ? pa : 1.684
     const aspect = size.x / size.y
@@ -270,7 +326,7 @@ export default shader({
     const r = ready.at(vec2(0, 0))
     const st = stage.at(vec2(0, 0)).x
     const top = q.uv.y > 0.95
-    const bar = top ? q.uv.x < r.y / WORDS : q.uv.x < (st > 0.5 ? st / (BANDS + 1) : r.x > 0.5 ? 0.05 : 0)
+    const bar = top ? q.uv.x < r.y / WORDS : q.uv.x < (st > 0.5 ? st / (BANDS + 2) : r.x > 0.5 ? 0.05 : 0)
     return vec4(bar ? (top ? vec3(0.1, 0.8, 0.2) : st > 0.5 ? vec3(1) : vec3(1, 0.85, 0.1)) : vec3(0.15), 1)
   })],
 })

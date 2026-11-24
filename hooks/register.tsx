@@ -58,6 +58,11 @@ let officialSvg: { scene: string; source: string } | undefined
 // A live wallpaper: a picture (an Svg made from the theme's video, kept in ~/.claude/prism-themes/live/<id>.svg)
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
+/**
+ * Bumped to draw the live backdrop again under a new scene name. At Desktop's start the backdrop is drawn before its
+ * shader can attach, and the bare Svg stays until the scene changes; a redraw a few seconds in brings the shader.
+ */
+let liveRedraw = 0
 let liveScene: { scene: string; source: string; id: string; native: boolean; generic: boolean; key: boolean } | undefined
 /** /prism native on|off: play the live wallpaper from <id>-native.svg, an Svg that moves by itself (no shader). */
 let native = false
@@ -359,7 +364,7 @@ async function applyTheme($: EngineInterface, id: string) {
   } else if (probeCells) {
     scene = PROBE_SCENE
   } else if (t && live) {
-    scene = sceneName(native ? 'native' : 'live', t.id)
+    scene = sceneName(native ? 'native' : 'live', liveRedraw ? `${t.id}-r${liveRedraw}` : t.id)
     liveScene = { scene, source: live.source, id: t.id, native, generic: live.generic, key: live.key === true }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
@@ -748,6 +753,14 @@ export const register: Register = on => {
     })
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
+    if (liveScene && !liveScene.native) {
+      const id = liveScene.id
+      $.clock.after(5000, () => {
+        if (liveScene?.id !== id) return
+        liveRedraw++
+        void applyTheme($, id).catch(() => undefined)
+      })
+    }
     stopTimer(ruleTimer)
     ruleTimer = library.rules.some(r => r.time) ? $.clock.every(60000, () => void followRules($).catch(() => undefined)) : undefined
     // Like the Codex port's build check: remember the version Prism last started on cleanly, and say so when an
