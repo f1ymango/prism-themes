@@ -19,9 +19,10 @@ import { THEMES } from '../core/themes'
 import type { ColorsState, Custom, Found, LibraryInfo, Tier1, Tier2 } from '../types'
 import {
   discover, ensureAssets, importV1, inspectBackground, install, loadLibrary, nextPulseN, providerFor, readPayloadId,
-  listRemoved, ownThemeId, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
+  listRemoved, ownThemeId, prismHome, removeEvent, removeTheme, restoreTheme, slotOf, sweepEvents, syncInstall, tier2Of, uninstall, VERSION, writeEvent,
   writeHealth, writePayload,
 } from './host'
+import { join } from '../core/discover'
 import type { Library, PulseKind, SessionEvent, SessionState } from './host'
 
 const P = 'prism-themes'
@@ -54,7 +55,18 @@ let colorsSent = false
 let officialSvg: { scene: string; source: string } | undefined
 /** /prism shadertest: an official GPU backdrop over a test picture, to see whether this Desktop plays shaders. */
 let shaderTest = false
+/** /prism shadertest layers: two full-window Svgs from ~/.claude/prism-themes/lab, the lower one under the shader. */
+let labLayers: { base: string; over: string } | undefined
 const SHADER_TEST_SCENE = 'prism-shader-test'
+async function loadLab($: EngineInterface): Promise<string | undefined> {
+  const home = await prismHome($)
+  if (!home) return 'Could not find ~/.claude/prism-themes.'
+  const base = await $.fs.read(join(home, 'lab', 'base.svg')).catch(() => undefined)
+  const over = await $.fs.read(join(home, 'lab', 'over.svg')).catch(() => undefined)
+  if (typeof base !== 'string' || typeof over !== 'string') return 'The test needs lab/base.svg and lab/over.svg in ~/.claude/prism-themes.'
+  labLayers = { base, over }
+  return undefined
+}
 const SHADER_TEST_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">' +
   '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14202a"/>' +
   '<stop offset="0.55" stop-color="#2c4a3a"/><stop offset="1" stop-color="#6a8a4a"/></linearGradient></defs>' +
@@ -466,10 +478,15 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   switch (word.toLowerCase()) {
     case 'shadertest': {
       const on = value.toLowerCase()
-      if (on !== 'on' && on !== 'off') return `Usage: /prism shadertest on|off — now ${shaderTest ? 'on' : 'off'}`
-      shaderTest = on === 'on'
-      await $.store.set('shaderTest', shaderTest)
+      if (on !== 'on' && on !== 'off' && on !== 'layers') {
+        return `Usage: /prism shadertest on|layers|off — now ${shaderTest ? (labLayers ? 'layers' : 'on') : 'off'}`
+      }
+      labLayers = undefined
+      if (on === 'layers') { const why = await loadLab($); if (why) return why }
+      shaderTest = on !== 'off'
+      await $.store.set('shaderTest', on === 'off' ? false : on)
       await applyTheme($, await read($, current))
+      if (on === 'layers') return 'Shader test (layers) on: the right side should ripple, the left third should stay still on top. /prism shadertest off ends it.'
       return shaderTest
         ? 'Shader test on: the background should ripple gently and glow where your pointer is. /prism shadertest off ends it.'
         : "Shader test off: the theme's own background is back."
@@ -629,7 +646,9 @@ export const register: Register = on => {
       await showCustom($, await loadCustom($))
       return reloadLibrary($)
     })
-    shaderTest = (await $.store.get('shaderTest').catch(() => false)) === true
+    const test = await $.store.get('shaderTest').catch(() => false)
+    shaderTest = test === true || test === 'on' || test === 'layers'
+    if (test === 'layers' && (await loadLab($))) shaderTest = false
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
     stopTimer(ruleTimer)
@@ -691,6 +710,17 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     if (!scene || !('Svg' in els)) return next(e)
     const { Svg } = els
+    if (scene === SHADER_TEST_SCENE && labLayers && 'Shader' in els && 'Box' in els) {
+      const { Shader, Box } = els
+      return (
+        <Box position="relative" width="100%" height="100%">
+          <Shader module="./shader-test.ts"><Svg source={labLayers.base} alt="The test picture, moving" /></Shader>
+          <Box position="absolute" top={0} left={0} width="100%" height="100%">
+            <Svg source={labLayers.over} alt="The test picture's still part" />
+          </Box>
+        </Box>
+      )
+    }
     if (scene === SHADER_TEST_SCENE && 'Shader' in els) {
       const { Shader } = els
       return <Shader module="./shader-test.ts"><Svg source={SHADER_TEST_SVG} alt="A rippling test scene" /></Shader>
