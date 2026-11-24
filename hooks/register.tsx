@@ -480,8 +480,8 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   switch (word.toLowerCase()) {
     case 'shadertest': {
       const [on = '', variant = 'b'] = value.toLowerCase().split(/\s+/)
-      if ((on !== 'on' && on !== 'off' && on !== 'layers') || !['a', 'b', 'c', 'd'].includes(variant)) {
-        return `Usage: /prism shadertest on|off, or /prism shadertest layers a|b|c|d — now ${shaderTest ? (labLayers ? `layers ${labVariant}` : 'on') : 'off'}`
+      if ((on !== 'on' && on !== 'off' && on !== 'layers') || !['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].includes(variant)) {
+        return `Usage: /prism shadertest on|off, or /prism shadertest layers a-h — now ${shaderTest ? (labLayers ? `layers ${labVariant}` : 'on') : 'off'}`
       }
       labLayers = undefined
       labVariant = variant
@@ -492,7 +492,8 @@ async function setting($: EngineInterface, args: string): Promise<string> {
       await applyTheme($, await read($, current))
       $.ui.invalidate('ui.render')
       if (on === 'layers') {
-        return `Shader test (layers ${labVariant}) on: ${labVariant === 'a' ? 'the whole picture should ripple (no still layer in this one)'
+        return `Shader test (layers ${labVariant}) on: ${labVariant === 'e' ? 'nothing moves; a picture should show (maybe only part of it, or two copies)'
+          : ['a', 'f', 'g', 'h'].includes(labVariant) ? 'the whole picture should ripple (no still layer in this one)'
           : labVariant === 'd' ? 'nothing moves in this one; the picture should show, with a yellow line about a third of the way across'
           : 'the picture should ripple, except the left third (left of a thin yellow line), which stays still'}. /prism shadertest off ends it.`
       }
@@ -725,6 +726,11 @@ export const register: Register = on => {
       const moving = <Shader module="./shader-test.ts"><Svg source={labLayers.base} alt="The test picture, moving" /></Shader>
       const still = <Svg source={labLayers.over} alt="The test picture's still part" />
       if (labVariant === 'a') return <Box>{moving}</Box>
+      // one change each from a: two Svgs; position relative; an empty absolute Box; a nested Box
+      if (labVariant === 'e') return <Box><Svg source={labLayers.base} alt="The test picture" />{still}</Box>
+      if (labVariant === 'f') return <Box position="relative">{moving}</Box>
+      if (labVariant === 'g') return <Box>{moving}<Box position="absolute" top={0} left={0} right={0} bottom={0} /></Box>
+      if (labVariant === 'h') return <Box><Box>{moving}</Box></Box>
       if (labVariant === 'd') {
         return (
           <Box position="relative" flexGrow={1}>
