@@ -57,6 +57,8 @@ let officialSvg: { scene: string; source: string } | undefined
 let shaderTest = false
 /** /prism shadertest layers: two full-window Svgs from ~/.claude/prism-themes/lab, the lower one under the shader. */
 let labLayers: { base: string; over: string } | undefined
+/** Which layout the layers test tries: a (Box around the shader), b (edges), c (edges + grow), d (no shader). */
+let labVariant = 'b'
 const SHADER_TEST_SCENE = 'prism-shader-test'
 async function loadLab($: EngineInterface): Promise<string | undefined> {
   const home = await prismHome($)
@@ -477,16 +479,23 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   let next: CustomBackground | undefined = bg
   switch (word.toLowerCase()) {
     case 'shadertest': {
-      const on = value.toLowerCase()
-      if (on !== 'on' && on !== 'off' && on !== 'layers') {
-        return `Usage: /prism shadertest on|layers|off — now ${shaderTest ? (labLayers ? 'layers' : 'on') : 'off'}`
+      const [on = '', variant = 'b'] = value.toLowerCase().split(/\s+/)
+      if ((on !== 'on' && on !== 'off' && on !== 'layers') || !['a', 'b', 'c', 'd'].includes(variant)) {
+        return `Usage: /prism shadertest on|off, or /prism shadertest layers a|b|c|d — now ${shaderTest ? (labLayers ? `layers ${labVariant}` : 'on') : 'off'}`
       }
       labLayers = undefined
+      labVariant = variant
       if (on === 'layers') { const why = await loadLab($); if (why) return why }
       shaderTest = on !== 'off'
       await $.store.set('shaderTest', on === 'off' ? false : on)
+      await $.store.set('labVariant', labVariant)
       await applyTheme($, await read($, current))
-      if (on === 'layers') return 'Shader test (layers) on: the right side should ripple, the left third should stay still on top. /prism shadertest off ends it.'
+      $.ui.invalidate('ui.render')
+      if (on === 'layers') {
+        return `Shader test (layers ${labVariant}) on: ${labVariant === 'a' ? 'the whole picture should ripple (no still layer in this one)'
+          : labVariant === 'd' ? 'nothing moves in this one; the picture should show, with a yellow line about a third of the way across'
+          : 'the picture should ripple, except the left third (left of a thin yellow line), which stays still'}. /prism shadertest off ends it.`
+      }
       return shaderTest
         ? 'Shader test on: the background should ripple gently and glow where your pointer is. /prism shadertest off ends it.'
         : "Shader test off: the theme's own background is back."
@@ -648,6 +657,7 @@ export const register: Register = on => {
     })
     const test = await $.store.get('shaderTest').catch(() => false)
     shaderTest = test === true || test === 'on' || test === 'layers'
+    labVariant = String((await $.store.get('labVariant').catch(() => 'b')) ?? 'b')
     if (test === 'layers' && (await loadLab($))) shaderTest = false
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
@@ -712,12 +722,21 @@ export const register: Register = on => {
     const { Svg } = els
     if (scene === SHADER_TEST_SCENE && labLayers && 'Shader' in els && 'Box' in els) {
       const { Shader, Box } = els
-      return (
-        <Box position="relative" width="100%" height="100%">
-          <Shader module="./shader-test.ts"><Svg source={labLayers.base} alt="The test picture, moving" /></Shader>
-          <Box position="absolute" top={0} left={0} width="100%" height="100%">
-            <Svg source={labLayers.over} alt="The test picture's still part" />
+      const moving = <Shader module="./shader-test.ts"><Svg source={labLayers.base} alt="The test picture, moving" /></Shader>
+      const still = <Svg source={labLayers.over} alt="The test picture's still part" />
+      if (labVariant === 'a') return <Box>{moving}</Box>
+      if (labVariant === 'd') {
+        return (
+          <Box position="relative" flexGrow={1}>
+            <Svg source={labLayers.base} alt="The test picture" />
+            <Box position="absolute" top={0} left={0} right={0} bottom={0}>{still}</Box>
           </Box>
+        )
+      }
+      return (
+        <Box position="relative" flexGrow={labVariant === 'c' ? 1 : undefined}>
+          {moving}
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>{still}</Box>
         </Box>
       )
     }
