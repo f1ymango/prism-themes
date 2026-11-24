@@ -1,14 +1,18 @@
 // The live wallpaper player for a keyframe sent as data: the Svg draws only a flat colour and a 16 x 8 grid of SMIL
 // cells (+ a clock) in its top left (viewBox 160 x 90, stretched). The shader collects 110 moments x 128 words of 24
-// bits, decodes the picture from them once (8x8 DCT, YCoCg, chroma halved, Exp-Golomb), then moves it with the
-// motion words, as hooks/live.ts does. The converter is notes/live-converter/key-svg.mjs; its header says the layout:
-//   words 0..15 header (0 'PRL', 1-3 scales * 65536, 4 loop ms, 5 aspect * 1e6, 6-7 motion frame, 8 'KEY', 9 s * 4096)
-//   16..1023 motion; 1024..1215 bit offset of each slice (Y block rows 0-95, Co 96-143, Cg 144-191); 1216.. stream.
-// A block is se(DC change), ue(n <= 15), then n x (ue(zero run), se(level)) in zigzag order.
-// Decoding: once every word is in, `B` finds where each block starts (each slice walks its blocks in parallel, 4 a
-// frame). Then 12 frames each decode one band of 64 picture rows: `K` takes each block's (up to 16) coefficients out
-// of the stream, `bands` rebuilds the band's pixels straight from them, and `pic` keeps the band. Every
-// pass is small but `pic`, which only copies. Until a band is in, the window shows the Svg's flat colour there.
+// bits, decodes the picture from them once (intra-predicted 8x8 blocks + DCT residuals, YCoCg, chroma halved,
+// Exp-Golomb), then moves it with the motion words, as hooks/live.ts does. The converter is
+// notes/live-converter/intra-svg.mjs; its header says the layout:
+//   words 0..15 header (0 'PRL', 1-3 scales * 65536, 4 loop ms, 5 aspect * 1e6, 6-7 motion frame, 8 'KI1', 9 s * 4096)
+//   16..1023 motion; 1024..1215 bit offset of each slice (Y block rows 0-95, Co 96-143, Cg 144-191);
+//   1216..1258 quantisers (luma 64 then chroma 64, raster order, a byte each, 3 a word, high byte first); 1259.. stream.
+// A block is [mode code] se(DC), ue(n <= 15), then n x (ue(zero run), se(level)) in zigzag order.
+// Decoding: once every word is in, B finds where each block starts and its mode (each slice walks its blocks in
+// parallel, 4 a frame). Then 54 frames rebuild the picture: tiles of 320 x 64 pixels (160 x 32 for chroma) predict
+// only from inside themselves, so all 48 rebuild together, a diagonal of blocks a frame (K takes those blocks'
+// coefficients out of the stream, W predicts + adds the residual, rec keeps the planes). Then 12 frames
+// paint pic from rec a band of 64 rows at a time, deblocked a frame later. Until then the window shows the
+// Svg's flat colour.
 import { abs, buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, still, table, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
 
 // /prism livedebug: 1 draws the decoder's progress over the top of the window
@@ -17,11 +21,14 @@ const v = values({ debug: [0, 1] })
 const CELLS = 128
 const MOMENTS = 110
 const WORDS = 14080
-const S0 = 1216
+const T0 = 1216
+const S0 = 1259
 // the coded picture: 1280 x 768, of which the top 760 rows show; 12 bands of 64 rows
 const CH = 768
 const PH = 760
 const BANDS = 12
+// rebuild steps: a 40 x 8 block tile takes 40 + 2 x 7 diagonals (a block needs its left, above and above-right blocks)
+const REC = 54
 
 const cellAt = (i: number) => vec2((mod(i, 16) + 0.5) / 160, 1 - (floor(i / 16) + 0.5) / 90)
 const word = (c: vec4): Int =>
@@ -48,20 +55,23 @@ const seen8: Buffer = buffer({ size: [16, 14], float: 32, filter: 'nearest' }, q
 const ready: Buffer = buffer({ size: [1, 1], float: 32, filter: 'nearest' }, () => {
   let n = 0
   for (let j = 0; j < 14; j++) for (let i = 0; i < 16; i++) n = n + seen8.at(vec2(i, j)).x
-  const marks = signed(at(0)) === 5263948 && signed(at(8)) === 4932953
+  const marks = signed(at(0)) === 5263948 && signed(at(8)) === 4933937
   return vec4(n > WORDS - 0.5 && marks ? 1 : 0, n, 0, 1)
 })
-// x: 0 until every block is placed, then 1..12 = decoding band x - 1 (2..13 also deblock window x - 2), 14 = done (it stays)
+// x: 0 until every block is placed, then 1..REC = rebuild step x - 1, then REC+1..REC+12 = painting band x - REC - 1
+// (REC+2..REC+13 also deblock window x - REC - 2), REC + 14 = done (it stays)
 const stage: Buffer = buffer({ size: [1, 1], float: 32, filter: 'nearest' }, () => {
   const s = stage.at(vec2(0, 0)).x
-  if (s > BANDS + 1.5) return vec4(s, 0, 0, 1)
+  if (s > REC + BANDS + 1.5) return vec4(s, 0, 0, 1)
   // every slice's last block known
   let all = 1
   for (const sl of range(192)) all = all * B.at(vec2(sl < 96 ? 159 : 79, sl)).z
   return vec4(all > 0.5 && going() ? s + 1 : 0, 0, 0, 1)
 })
-const done = () => stage.at(vec2(0, 0)).x > BANDS + 1.5
-const band = () => stage.at(vec2(0, 0)).x - 1
+const done = () => stage.at(vec2(0, 0)).x > REC + BANDS + 1.5
+const rebuilding = () => stage.at(vec2(0, 0)).x > 0.5 && stage.at(vec2(0, 0)).x < REC + 0.5
+const rstep = () => stage.at(vec2(0, 0)).x - 1
+const band = () => stage.at(vec2(0, 0)).x - REC - 1
 
 // --- the bit stream -----------------------------------------------------------------------------------------------
 /** 32 bits of the stream from bit p, as an int (the first bit at the top) */
@@ -97,8 +107,14 @@ function seAt(p: number): vec2 {
   const u = ueAt(p)
   return vec2(mod(u.x, 2) > 0.5 ? (u.x + 1) / 2 : 0 - u.x / 2, u.y)
 }
-/** walks one block from bit p: x the bit after it, y its DC (dc = the DC before it) */
-function blockEnd(p: number, dc: number): vec2 {
+/** a block's mode code at bit p: '1' = mpm, else '0' + the rank among the other 7 (3 bits). x the mode, y the bit after */
+function modeAt(p: number, mpm: number): vec2 {
+  const w = window32(p)
+  const r = unsigned(int(int(w >>> 28) & 7))
+  return unsigned(int(w >>> 31)) > 0.5 ? vec2(mpm, p + 1) : vec2(r < mpm - 0.5 ? r : r + 1, p + 4)
+}
+/** walks one block's levels from bit p (its DC): the bit after the block */
+function blockEnd(p: number): number {
   const d = seAt(p)
   const n = ueAt(d.y)
   let pos = n.y
@@ -107,10 +123,10 @@ function blockEnd(p: number, dc: number): vec2 {
     const l = seAt(r.y)
     pos = i < n.x ? l.y : pos
   }
-  return vec2(pos, dc + d.x)
+  return pos
 }
-/** entry i of the block at bit p: x its zigzag index, y its level (entry 0 is the DC; past the last, level 0) */
-function entry(p: number, dc: number, i: number): vec2 {
+/** entry i of the block whose DC is at bit p: x its zigzag index, y its level (entry 0 is the DC; past the last, level 0) */
+function entry(p: number, i: number): vec2 {
   const d = seAt(p)
   const n = ueAt(d.y)
   let pos = n.y
@@ -124,84 +140,153 @@ function entry(p: number, dc: number, i: number): vec2 {
     lev = live && j > i - 1.5 ? l.x : lev
     pos = live ? l.y : pos
   }
-  return i < 0.5 ? vec2(0, dc + d.x) : i < n.x + 0.5 ? vec2(k, lev) : vec2(0, 0)
+  return i < 0.5 ? vec2(0, d.x) : i < n.x + 0.5 ? vec2(k, lev) : vec2(0, 0)
 }
 
-// zigzag index -> raster position; quantisers (raster order); the 8-point inverse DCT basis, [x * 8 + u]
+// zigzag index -> raster position; the 8-point inverse DCT basis, [x * 8 + u]
 const ZZ = table([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63], 'int')
-const QL = table([16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99], 'int')
-const QC = table([17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99], 'int')
+/** quantiser t of the picture's tables (0-63 luma, 64-127 chroma, raster order) */
+function quant(t: number): number {
+  const w = signed(at(T0 + floor(t / 3)))
+  const r = mod(t, 3)
+  return mod(floor(w / (r < 0.5 ? 65536 : r < 1.5 ? 256 : 1)), 256)
+}
 const C8 = table([0.35355, 0.49039, 0.46194, 0.41573, 0.35355, 0.27779, 0.19134, 0.09755, 0.35355, 0.41573, 0.19134, -0.09755, -0.35355, -0.49039, -0.46194, -0.27779, 0.35355, 0.27779, -0.19134, -0.49039, -0.35355, 0.09755, 0.46194, 0.41573, 0.35355, 0.09755, -0.46194, -0.27779, 0.35355, 0.41573, -0.19134, -0.49039, 0.35355, -0.09755, -0.46194, 0.27779, 0.35355, -0.41573, -0.19134, 0.49039, 0.35355, -0.27779, -0.19134, 0.49039, -0.35355, -0.09755, 0.46194, -0.41573, 0.35355, -0.41573, 0.19134, 0.09755, -0.35355, 0.49039, -0.46194, 0.27779, 0.35355, -0.49039, 0.46194, -0.41573, 0.35355, -0.27779, 0.19134, -0.09755])
 
 // --- decoding, once every word is in -------------------------------------------------------------------------------
 const going = () => ready.at(vec2(0, 0)).x > 0.5 && !done()
-// per slice (y) and block (x): x the block's first bit, y the DC before it, z 1 once known. A block becomes known when
-// the one before it is; 4 runs a frame, so the 160 blocks of a row take 40 frames.
-const B: Buffer = buffer({ size: [160, 192], float: 32, filter: 'nearest', repeat: 4 }, q => {
+// per slice (y) and block (x): x the bit where the block's DC starts, y its mode, z 1 once known. A block becomes known
+// when the one before it is; 2 runs a frame, so the 160 blocks of a row take 80 frames. Cg blocks have no mode code
+// (they use their Co block's mode); a block's mpm is the mode of the block to its left in the same tile, else DC.
+const B: Buffer = buffer({ size: [160, 192], float: 32, filter: 'nearest', repeat: 2 }, q => {
   if (!going()) return vec4(0)
   const old = B.at(q.cell)
   if (old.z > 0.5) return old
   const b = q.cell.x
   const sl = q.cell.y
   if (b > (sl < 96 ? 159.5 : 79.5)) return vec4(0, 0, 1, 1)
-  if (b < 0.5) return vec4(signed(at(1024 + sl)), 0, 1, 1)
+  const coded = sl < 143.5 ? 1 : 0
+  if (b < 0.5) {
+    const s0 = signed(at(1024 + sl))
+    const m0 = coded > 0.5 ? modeAt(s0, 0) : vec2(0, s0)
+    return vec4(m0.y, m0.x, 1, 1)
+  }
   const prev = B.at(vec2(b - 1, sl))
   if (prev.z < 0.5) return old
-  const e = blockEnd(prev.x, prev.y)
-  return vec4(e.x, e.y, 1, 1)
+  const e = blockEnd(prev.x)
+  const mpm = mod(b, sl < 95.5 ? 40 : 20) < 0.5 ? 0 : prev.y
+  const m = coded > 0.5 ? modeAt(e, mpm) : vec2(0, e)
+  return vec4(m.y, m.x, 1, 1)
 })
 const S = () => signed(at(9)) / 4096
-const decoding = () => stage.at(vec2(0, 0)).x > 0.5 && stage.at(vec2(0, 0)).x < BANDS + 0.5
-// deblocking trails the decode by a frame: window w = stage - 2 covers picture rows 64w - 4 .. 64w + 59, which hold
-// whole edge neighbourhoods (4 rows each side of every 8th row), so a window needs no rows from outside itself
-const deblocking = () => stage.at(vec2(0, 0)).x > 1.5 && !done()
-const win = () => stage.at(vec2(0, 0)).x - 2
+const decoding = () => stage.at(vec2(0, 0)).x > REC + 0.5 && stage.at(vec2(0, 0)).x < REC + BANDS + 0.5
+// deblocking trails the painting by a frame: window w = stage - REC - 2 covers picture rows 64w - 4 .. 64w + 59, which
+// hold whole edge neighbourhoods (4 rows each side of every 8th row), so a window needs no rows from outside itself
+const deblocking = () => stage.at(vec2(0, 0)).x > REC + 1.5 && !done()
+const win = () => stage.at(vec2(0, 0)).x - REC - 2
 
-// this frame's band, per block: 16 entries, entry i at x = block * 8 + i % 8, y = row * 2 + floor(i / 8), where
-// rows 0-7 are Y block rows, 8-11 Co, 12-15 Cg (a side holds at most 2048).
-const K: Buffer = buffer({ size: [1280, 32], float: 32, filter: 'nearest' }, q => {
-  if (!decoding()) return vec4(0)
-  const t = band()
-  const bx = floor(q.cell.x / 8)
-  const j = floor(q.cell.y / 2)
-  const i = q.cell.x - bx * 8 + (q.cell.y - j * 2) * 8
-  const sl = j < 7.5 ? t * 8 + j : j < 11.5 ? 96 + t * 4 + j - 8 : 144 + t * 4 + j - 12
-  if (j > 7.5 && bx > 79.5) return vec4(0)
-  const info = B.at(vec2(bx, sl))
-  const e = entry(info.x, info.y, i)
-  return vec4(e, 0, 1)
-})
-// a pixel of a block from its 16 entries: row k of K, block bx, at (xi, yi) inside it
-function rebuild(k: number, bx: number, xi: number, yi: number, chroma: boolean): number {
-  let s = 0
-  for (const i of range(16)) {
-    const e = K.at(vec2(bx * 8 + mod(i, 8), k * 2 + floor(i / 8)))
-    const pos = signed(ZZ.at(e.x))
-    const u = mod(pos, 8)
-    const w = floor(pos / 8)
-    const qv = signed(chroma ? QC.at(pos) : QL.at(pos))
-    s = s + e.y * qv * C8.at(xi * 8 + u) * C8.at(yi * 8 + w)
-  }
-  return s * S() + 128
+// --- the rebuild: 48 tiles in lockstep, a block diagonal (tx + 2 ty) of each a step ------------------------------------
+// Slots: 0-383 luma (tile * 8 + ty: tiles 4 across, 12 down, of 40 x 8 blocks), 384-575 Co and 576-767 Cg (tile * 4 + ty,
+// tiles of 20 x 4 blocks). Slot g at step t -> x block, y block row, z plane (0 Y, 1 Co, 2 Cg), w 1 if it has a block.
+function slotBlock(g: number, t: number): vec4 {
+  const luma = g < 383.5
+  const h = luma ? g : mod(g - 384, 192)
+  const per = luma ? 8 : 4
+  const tw = luma ? 40 : 20
+  const tile = floor(h / per)
+  const ty = h - tile * per
+  const tx = t - 2 * ty
+  const plane = luma ? 0 : g < 575.5 ? 1 : 2
+  return vec4(mod(tile, 4) * tw + tx, floor(tile / 4) * per + ty, plane, tx > -0.5 && tx < tw - 0.5 ? 1 : 0)
 }
-// this frame's band of the picture: cell.y 32..95 luma (1280 x 64, row rr at 95 - rr), 0..31 chroma (640 x 32, row y at 31 - y)
-const bands: Buffer = buffer({ size: [1280, 96], float: 16, filter: 'nearest' }, q => {
-  if (!decoding()) return vec4(0)
-  if (q.cell.y > 31.5) {
-    const rr = 95 - q.cell.y
-    const bx = floor(q.cell.x / 8)
-    const by = floor(rr / 8)
-    return vec4(rebuild(by, bx, q.cell.x - bx * 8, rr - by * 8, false), 0, 0, 1)
-  }
-  if (q.cell.x > 639.5) return vec4(0)
-  const rr = 31 - q.cell.y
-  const bx = floor(q.cell.x / 8)
-  const by = floor(rr / 8)
-  const xi = q.cell.x - bx * 8
-  const yi = rr - by * 8
-  return vec4(rebuild(8 + by, bx, xi, yi, true), rebuild(12 + by, bx, xi, yi, true), 0, 1)
+const sliceOf = (b: vec4) => (b.z < 0.5 ? b.y : b.z < 1.5 ? 96 + b.y : 144 + b.y)
+// this step's blocks' entries: slot g's entry i at x = (g mod 64) * 16 + i, y = floor(g / 64); y the dequantised level
+const K: Buffer = buffer({ size: [1024, 12], float: 32, filter: 'nearest' }, q => {
+  if (!rebuilding()) return vec4(0)
+  const g = q.cell.y * 64 + floor(q.cell.x / 16)
+  const sb = slotBlock(g, rstep())
+  if (sb.w < 0.5) return vec4(0)
+  const e = entry(B.at(vec2(sb.x, sliceOf(sb))).x, mod(q.cell.x, 16))
+  return vec4(e.x, e.y * quant((sb.z > 0.5 ? 64 : 0) + signed(ZZ.at(e.x))), 0, 1)
 })
-const chromaAt = (x: number, y: number) => bands.at(vec2(x, 31 - y)).xy
+/** a decoded sample of a plane at picture position (px, py), 0..255 */
+function pix(plane: number, px: number, py: number): number {
+  const c = rec.at(vec2(px, CH - 1 - py))
+  return floor((plane < 0.5 ? c.r : plane < 1.5 ? c.g : c.b) * 255 + 0.5)
+}
+/** mode m's prediction of pixel (x, y) of block (bx, by), from the decoded row above (+ above-right), the column to the
+ * left and the corner, inside the tile; integer arithmetic, as intra-svg.mjs */
+function predict(plane: number, bx: number, by: number, m: number, x: number, y: number): number {
+  const tw = plane < 0.5 ? 40 : 20
+  const th = plane < 0.5 ? 8 : 4
+  const x0 = bx * 8
+  const y0 = by * 8
+  const hasT = mod(by, th) > 0.5 ? 1 : 0
+  const hasL = mod(bx, tw) > 0.5 ? 1 : 0
+  const hasTR = hasT > 0.5 && mod(bx, tw) < tw - 1.5 ? 1 : 0
+  const t0 = hasL > 0.5 ? pix(plane, x0 - 1, y0) : 128
+  const T = (i: number) => (hasT > 0.5 ? pix(plane, x0 + (hasTR > 0.5 ? i : min(i, 7)), y0 - 1) : t0)
+  const l0 = hasT > 0.5 ? pix(plane, x0, y0 - 1) : 128
+  const L = (i: number) => (hasL > 0.5 ? pix(plane, x0 - 1, y0 + i) : l0)
+  const c = hasT + hasL > 1.5 ? pix(plane, x0 - 1, y0 - 1) : hasT > 0.5 ? l0 : hasL > 0.5 ? t0 : 128
+  const tx = T(x)
+  const ly = L(y)
+  let sum = 8
+  for (const i of range(8)) sum = sum + T(i) + L(i)
+  const dc = floor(sum / 16)
+  const base = tx + ly - c
+  const pl = abs(base - ly)
+  const pt = abs(base - tx)
+  const pc = abs(base - c)
+  const paeth = pl <= pt && pl <= pc ? ly : pt <= pc ? tx : c
+  const smo = floor(((8 - y) * tx + (y + 1) * L(7) + (8 - x) * ly + (x + 1) * T(7) + 9) / 18)
+  const s5 = x + y
+  const d45 = floor((T(min(s5, 15)) + 2 * T(min(s5 + 1, 15)) + T(min(s5 + 2, 15)) + 2) / 4)
+  const E = (k: number) => (k < -0.5 ? L(0 - k - 1) : k < 0.5 ? c : T(k - 1))
+  const d = x - y
+  const d135 = floor((E(clamp(d - 1, -8, 8)) + 2 * E(clamp(d, -8, 8)) + E(clamp(d + 1, -8, 8)) + 2) / 4)
+  const grad = clamp(ly + tx - c, 0, 255)
+  return m < 0.5 ? dc : m < 1.5 ? tx : m < 2.5 ? ly : m < 3.5 ? paeth : m < 4.5 ? smo : m < 5.5 ? d45 : m < 6.5 ? d135 : grad
+}
+// this step's blocks, decoded: slot g's pixel (xi, yi) at x = (g mod 128) * 8 + xi, y = floor(g / 128) * 8 + yi
+const W: Buffer = buffer({ size: [1024, 48], float: 16, filter: 'nearest' }, q => {
+  if (!rebuilding()) return vec4(0)
+  const g = floor(q.cell.y / 8) * 128 + floor(q.cell.x / 8)
+  const xi = mod(q.cell.x, 8)
+  const yi = mod(q.cell.y, 8)
+  const sb = slotBlock(g, rstep())
+  if (sb.w < 0.5) return vec4(0)
+  let r = 0
+  for (const i of range(16)) {
+    const e = K.at(vec2(mod(g, 64) * 16 + i, floor(g / 64)))
+    const pos = signed(ZZ.at(e.x))
+    r = r + e.y * C8.at(xi * 8 + mod(pos, 8)) * C8.at(yi * 8 + floor(pos / 8))
+  }
+  const mode = B.at(vec2(sb.x, sb.z < 0.5 ? sb.y : 96 + sb.y)).y
+  return vec4(clamp(floor(r * S() + predict(sb.z, sb.x, sb.y, mode, xi, yi) + 0.5), 0, 255), 0, 0, 1)
+})
+const wAt = (g: number, xi: number, yi: number) => W.at(vec2(mod(g, 128) * 8 + xi, floor(g / 128) * 8 + yi)).x / 255
+// the decoded planes, kept: r luma (1280 x 768), g Co and b Cg (640 x 384, at x < 640, picture row < 384); row py at
+// y = CH - 1 - py. Each step copies in the blocks W just decoded.
+const rec: Buffer = buffer({ size: [1280, 768], filter: 'nearest' }, q => {
+  const old = rec.at(q.cell)
+  if (stage.at(vec2(0, 0)).x < 0.5) return vec4(0)
+  if (!rebuilding()) return old
+  const t = rstep()
+  const px = q.cell.x
+  const py = CH - 1 - q.cell.y
+  const bx = floor(px / 8)
+  const by = floor(py / 8)
+  const xi = px - bx * 8
+  const yi = py - by * 8
+  const lt = mod(bx, 40) + 2 * mod(by, 8)
+  const yv = lt > t - 0.5 && lt < t + 0.5 ? wAt((floor(by / 8) * 4 + floor(bx / 40)) * 8 + mod(by, 8), xi, yi) : old.r
+  const ct = mod(bx, 20) + 2 * mod(by, 4)
+  const isC = px < 639.5 && py < 383.5 && ct > t - 0.5 && ct < t + 0.5
+  const gc = (floor(by / 4) * 4 + floor(bx / 20)) * 4 + mod(by, 4)
+  return vec4(yv, isC ? wAt(384 + gc, xi, yi) : old.g, isC ? wAt(576 + gc, xi, yi) : old.b, 1)
+})
+const chromaAt = (x: number, y: number) => rec.at(vec2(x, CH - 1 - y)).gb * 255
 // --- deblocking, a window a frame -------------------------------------------------------------------------------------
 // The 8x8 blocks show as steps at their edges. Across each edge (luma every 8 pixels, chroma every 16), a step smaller
 // than a real edge is ramped out over 4 pixels each side where both blocks are flat, or eased at the two edge pixels
@@ -219,8 +304,8 @@ function deb(p3: number, p2: number, p1: number, p0: number, q0: number, q1: num
 }
 // one line of 8 YCoCg pixels across an edge, filtered at offset k (-4..3); chroma only on its own (16 px) edges
 function debLine(t0: vec3, t1: vec3, t2: vec3, t3: vec3, t4: vec3, t5: vec3, t6: vec3, t7: vec3, k: number, chroma: number): vec3 {
-  const ql = S() * 2
-  const qc = S() * 2.125
+  const ql = S() * quant(0) / 8
+  const qc = S() * quant(64) / 8
   const y = deb(t0.x, t1.x, t2.x, t3.x, t4.x, t5.x, t6.x, t7.x, k, ql * 4, ql * 1.5, ql)
   const self = k < -3.5 ? t0 : k < -2.5 ? t1 : k < -1.5 ? t2 : k < -0.5 ? t3 : k < 0.5 ? t4 : k < 1.5 ? t5 : k < 2.5 ? t6 : t7
   const o = chroma > 0.5 ? deb(t0.y, t1.y, t2.y, t3.y, t4.y, t5.y, t6.y, t7.y, k, qc * 4, qc * 1.5, qc) : self.y
@@ -263,14 +348,15 @@ const pic: Buffer = buffer({ size: [1280, 768], filter: 'linear', wrap: 'clamp' 
   const t = band()
   const rr = CH - 1 - q.cell.y - t * 64
   if (rr < -0.5 || rr > 63.5) return old
-  const yv = bands.at(vec2(q.cell.x, 95 - rr)).x
-  // chroma sits between luma pixels: blend the four nearest, within this band
+  const py = CH - 1 - q.cell.y
+  const yv = floor(rec.at(q.cell).r * 255 + 0.5)
+  // chroma sits between luma pixels: blend the four nearest
   const cx = clamp((q.cell.x + 0.5) / 2 - 0.5, 0, 639)
-  const cy = clamp((rr + 0.5) / 2 - 0.5, 0, 31)
+  const cy = clamp((py + 0.5) / 2 - 0.5, 0, 383)
   const x0 = floor(cx)
   const y0 = floor(cy)
   const x1 = min(x0 + 1, 639)
-  const y1 = min(y0 + 1, 31)
+  const y1 = min(y0 + 1, 383)
   const ax = cx - x0
   const ay = cy - y0
   const c = vec2(mix2(mix2(chromaAt(x0, y0), chromaAt(x1, y0), ax), mix2(chromaAt(x0, y1), chromaAt(x1, y1), ax), ay))
@@ -309,7 +395,7 @@ const sway: Buffer = buffer({ size: [24, 14], float: 16, filter: 'linear', wrap:
 
 export default shader({
   fps: 30,
-  passes: [acc, seen8, ready, stage, B, K, bands, dbH, dbV, pic, sway, picture(q => {
+  passes: [acc, seen8, ready, stage, B, K, W, rec, dbH, dbV, pic, sway, picture(q => {
     const pa = signed(at(5)) / 1000000
     const a = pa > 0.1 ? pa : 1.684
     const aspect = size.x / size.y
@@ -322,11 +408,11 @@ export default shader({
     const flat = scene.sample(vec2(0.99, 0.02)).rgb
     const img = c.a > 0.5 ? c.rgb : flat
     if (v.debug < 0.5 || q.uv.y < 0.9) return vec4(img, 1)
-    // debug strip: words seen (green, top), then the stage: blocks placing (yellow), bands (white, growing)
+    // debug strip: words seen (green, top), then the stage: blocks placing (yellow), rebuild + bands (white, growing)
     const r = ready.at(vec2(0, 0))
     const st = stage.at(vec2(0, 0)).x
     const top = q.uv.y > 0.95
-    const bar = top ? q.uv.x < r.y / WORDS : q.uv.x < (st > 0.5 ? st / (BANDS + 2) : r.x > 0.5 ? 0.05 : 0)
+    const bar = top ? q.uv.x < r.y / WORDS : q.uv.x < (st > 0.5 ? st / (REC + BANDS + 2) : r.x > 0.5 ? 0.05 : 0)
     return vec4(bar ? (top ? vec3(0.1, 0.8, 0.2) : st > 0.5 ? vec3(1) : vec3(1, 0.85, 0.1)) : vec3(0.15), 1)
   })],
 })
