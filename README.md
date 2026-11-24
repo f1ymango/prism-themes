@@ -21,6 +21,11 @@ the app through its React DevTools extension slot it builds on.
 > no longer work on current versions. What remains is what Claude Code's official theme API draws: palette colours,
 > and gradient or small SVG backgrounds. Prism will not try to get around the new check. Development is paused until
 > a supported route exists; the Codex integration is unaffected.
+>
+> **Interim (0.10.x):** an experimental moving backdrop on the official route. The picture is one SVG made from a
+> wallpaper, and a GPU shader replays the motion measured from its video. It is a temporary measure while other routes
+> are tested, not a replacement for video backgrounds. It needs a picture generated on your own machine, and the tool
+> that makes one isn't included yet, so for now it does nothing on other setups.
 
 ## Claude Desktop demos
 

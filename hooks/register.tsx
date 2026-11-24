@@ -57,40 +57,12 @@ let officialSvg: { scene: string; source: string } | undefined
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
 let liveScene: { scene: string; source: string; id: string } | undefined
-/**
- * /prism livetest a|b|c|off: finds which part keeps the live backdrop still. a: the test shader over the live
- * picture; b: the live shader over the small test picture; c: the live motion alone (no smoothing) over the picture.
- */
-let liveTest = ''
 async function loadLive($: EngineInterface, id: string): Promise<string | undefined> {
   const home = await prismHome($)
   if (!home) return undefined
   const source = await $.fs.read(join(home, 'live', `${id}.svg`)).catch(() => undefined)
   return typeof source === 'string' && source.length <= OFFICIAL_SVG_MAX ? source : undefined
 }
-/** /prism shadertest: an official GPU backdrop over a test picture, to see whether this Desktop plays shaders. */
-let shaderTest = false
-/** /prism shadertest layers: two full-window Svgs from ~/.claude/prism-themes/lab, the lower one under the shader. */
-let labLayers: { base: string; over: string } | undefined
-/** Which layout the layers test tries: a (Box around the shader), b (edges), c (edges + grow), d (no shader). */
-let labVariant = 'b'
-const SHADER_TEST_SCENE = 'prism-shader-test'
-async function loadLab($: EngineInterface): Promise<string | undefined> {
-  const home = await prismHome($)
-  if (!home) return 'Could not find ~/.claude/prism-themes.'
-  const base = await $.fs.read(join(home, 'lab', 'base.svg')).catch(() => undefined)
-  const over = await $.fs.read(join(home, 'lab', 'over.svg')).catch(() => undefined)
-  if (typeof base !== 'string' || typeof over !== 'string') return 'The test needs lab/base.svg and lab/over.svg in ~/.claude/prism-themes.'
-  labLayers = { base, over }
-  return undefined
-}
-const SHADER_TEST_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">' +
-  '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14202a"/>' +
-  '<stop offset="0.55" stop-color="#2c4a3a"/><stop offset="1" stop-color="#6a8a4a"/></linearGradient></defs>' +
-  '<rect width="1600" height="900" fill="url(#g)"/>' +
-  Array.from({ length: 16 }, (_, i) => `<rect x="${i * 100}" y="0" width="40" height="900" fill="#ffffff" opacity="0.05"/>`).join('') +
-  '<circle cx="1150" cy="300" r="170" fill="#e8d27a" opacity="0.35"/><circle cx="420" cy="640" r="110" fill="#7ac0e8" opacity="0.25"/></svg>'
-
 let discovery: Discovery = { evidence: [] }
 let event: SessionEvent = { pulse: null, state: 'idle', stateAt: 0 }
 let library: Library = { themes: [], problems: [], rules: [], ruleErrors: [] }
@@ -329,10 +301,8 @@ async function applyTheme($: EngineInterface, id: string) {
   officialSvg = undefined
   liveScene = undefined
   let scene: string | undefined
-  const live = !shaderTest && t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id) : undefined
-  if (shaderTest) {
-    scene = SHADER_TEST_SCENE
-  } else if (t && live) {
+  const live = t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id) : undefined
+  if (t && live) {
     scene = sceneName('live', t.id)
     liveScene = { scene, source: live, id: t.id }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
@@ -498,40 +468,6 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   const bg = await loadCustom($)
   let next: CustomBackground | undefined = bg
   switch (word.toLowerCase()) {
-    case 'shadertest': {
-      const [on = '', variant = 'b'] = value.toLowerCase().split(/\s+/)
-      if ((on !== 'on' && on !== 'off' && on !== 'layers') || !['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].includes(variant)) {
-        return `Usage: /prism shadertest on|off, or /prism shadertest layers a-h — now ${shaderTest ? (labLayers ? `layers ${labVariant}` : 'on') : 'off'}`
-      }
-      labLayers = undefined
-      labVariant = variant
-      if (on === 'layers') { const why = await loadLab($); if (why) return why }
-      shaderTest = on !== 'off'
-      await $.store.set('shaderTest', on === 'off' ? false : on)
-      await $.store.set('labVariant', labVariant)
-      await applyTheme($, await read($, current))
-      $.ui.invalidate('ui.render')
-      if (on === 'layers') {
-        return `Shader test (layers ${labVariant}) on: ${labVariant === 'e' ? 'nothing moves; a picture should show (maybe only part of it, or two copies)'
-          : ['a', 'f', 'g', 'h'].includes(labVariant) ? 'the whole picture should ripple (no still layer in this one)'
-          : labVariant === 'd' ? 'nothing moves in this one; the picture should show, with a yellow line about a third of the way across'
-          : 'the picture should ripple, except the left third (left of a thin yellow line), which stays still'}. /prism shadertest off ends it.`
-      }
-      return shaderTest
-        ? 'Shader test on: the background should ripple gently and glow where your pointer is. /prism shadertest off ends it.'
-        : "Shader test off: the theme's own background is back."
-    }
-    case 'livetest': {
-      const v = value.toLowerCase()
-      if (!['a', 'b', 'c', 'off'].includes(v)) return `Usage: /prism livetest a|b|c|off — now ${liveTest || 'off'}`
-      liveTest = v === 'off' ? '' : v
-      await $.store.set('liveTest', liveTest)
-      $.ui.invalidate('ui.render')
-      return liveTest === 'a' ? 'Live test a: the M4A1 picture should ripple like water and glow where your pointer is.'
-        : liveTest === 'b' ? 'Live test b: a small test scene should show, softened and gently swaying.'
-        : liveTest === 'c' ? 'Live test c: the M4A1 picture, crisp, with her head and hair swaying over about 8 seconds.'
-        : 'Live test off.'
-    }
     case 'bg': {
       if (!value) return 'Usage: /prism bg <image, SVG or video file, or a folder> — or /prism bg off'
       if (value === 'off') { next = undefined; break }
@@ -687,11 +623,6 @@ export const register: Register = on => {
       await showCustom($, await loadCustom($))
       return reloadLibrary($)
     })
-    liveTest = String((await $.store.get('liveTest').catch(() => '')) ?? '')
-    const test = await $.store.get('shaderTest').catch(() => false)
-    shaderTest = test === true || test === 'on' || test === 'layers'
-    labVariant = String((await $.store.get('labVariant').catch(() => 'b')) ?? 'b')
-    if (test === 'layers' && (await loadLab($))) shaderTest = false
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
     stopTimer(ruleTimer)
@@ -753,43 +684,10 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     if (!scene || !('Svg' in els)) return next(e)
     const { Svg } = els
-    if (scene === SHADER_TEST_SCENE && labLayers && 'Shader' in els && 'Box' in els) {
-      const { Shader, Box } = els
-      const moving = <Shader module="./shader-test.ts"><Svg source={labLayers.base} alt="The test picture, moving" /></Shader>
-      const still = <Svg source={labLayers.over} alt="The test picture's still part" />
-      if (labVariant === 'a') return <Box>{moving}</Box>
-      // one change each from a: two Svgs; position relative; an empty absolute Box; a nested Box
-      if (labVariant === 'e') return <Box><Svg source={labLayers.base} alt="The test picture" />{still}</Box>
-      if (labVariant === 'f') return <Box position="relative">{moving}</Box>
-      if (labVariant === 'g') return <Box>{moving}<Box position="absolute" top={0} left={0} right={0} bottom={0} /></Box>
-      if (labVariant === 'h') return <Box><Box>{moving}</Box></Box>
-      if (labVariant === 'd') {
-        return (
-          <Box position="relative" flexGrow={1}>
-            <Svg source={labLayers.base} alt="The test picture" />
-            <Box position="absolute" top={0} left={0} right={0} bottom={0}>{still}</Box>
-          </Box>
-        )
-      }
-      return (
-        <Box position="relative" flexGrow={labVariant === 'c' ? 1 : undefined}>
-          {moving}
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>{still}</Box>
-        </Box>
-      )
-    }
-    if (scene === SHADER_TEST_SCENE && 'Shader' in els) {
-      const { Shader } = els
-      return <Shader module="./shader-test.ts"><Svg source={SHADER_TEST_SVG} alt="A rippling test scene" /></Shader>
-    }
-    if (scene === SHADER_TEST_SCENE) return <Svg source={SHADER_TEST_SVG} alt="A test scene" />
     if (liveScene?.scene === scene) {
       const alt = 'Your background, moving as its video does'
       if ('Shader' in els && liveScene.id === 'm4a1') {
         const { Shader } = els
-        if (liveTest === 'a') return <Shader module="./shader-test.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
-        if (liveTest === 'b') return <Shader module="./live-m4a1.ts"><Svg source={SHADER_TEST_SVG} alt="A test scene" /></Shader>
-        if (liveTest === 'c') return <Shader module="./live-m4a1-warp.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
         return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
       }
       return <Svg source={liveScene.source} alt="Your background" />
