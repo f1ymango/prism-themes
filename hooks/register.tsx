@@ -57,6 +57,11 @@ let officialSvg: { scene: string; source: string } | undefined
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
 let liveScene: { scene: string; source: string; id: string } | undefined
+/**
+ * /prism livetest a|b|c|off: finds which part keeps the live backdrop still. a: the test shader over the live
+ * picture; b: the live shader over the small test picture; c: the live motion alone (no smoothing) over the picture.
+ */
+let liveTest = ''
 async function loadLive($: EngineInterface, id: string): Promise<string | undefined> {
   const home = await prismHome($)
   if (!home) return undefined
@@ -516,6 +521,17 @@ async function setting($: EngineInterface, args: string): Promise<string> {
         ? 'Shader test on: the background should ripple gently and glow where your pointer is. /prism shadertest off ends it.'
         : "Shader test off: the theme's own background is back."
     }
+    case 'livetest': {
+      const v = value.toLowerCase()
+      if (!['a', 'b', 'c', 'off'].includes(v)) return `Usage: /prism livetest a|b|c|off — now ${liveTest || 'off'}`
+      liveTest = v === 'off' ? '' : v
+      await $.store.set('liveTest', liveTest)
+      $.ui.invalidate('ui.render')
+      return liveTest === 'a' ? 'Live test a: the M4A1 picture should ripple like water and glow where your pointer is.'
+        : liveTest === 'b' ? 'Live test b: a small test scene should show, softened and gently swaying.'
+        : liveTest === 'c' ? 'Live test c: the M4A1 picture, crisp, with her head and hair swaying over about 8 seconds.'
+        : 'Live test off.'
+    }
     case 'bg': {
       if (!value) return 'Usage: /prism bg <image, SVG or video file, or a folder> — or /prism bg off'
       if (value === 'off') { next = undefined; break }
@@ -671,6 +687,7 @@ export const register: Register = on => {
       await showCustom($, await loadCustom($))
       return reloadLibrary($)
     })
+    liveTest = String((await $.store.get('liveTest').catch(() => '')) ?? '')
     const test = await $.store.get('shaderTest').catch(() => false)
     shaderTest = test === true || test === 'on' || test === 'layers'
     labVariant = String((await $.store.get('labVariant').catch(() => 'b')) ?? 'b')
@@ -770,6 +787,9 @@ export const register: Register = on => {
       const alt = 'Your background, moving as its video does'
       if ('Shader' in els && liveScene.id === 'm4a1') {
         const { Shader } = els
+        if (liveTest === 'a') return <Shader module="./shader-test.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
+        if (liveTest === 'b') return <Shader module="./live-m4a1.ts"><Svg source={SHADER_TEST_SVG} alt="A test scene" /></Shader>
+        if (liveTest === 'c') return <Shader module="./live-m4a1-warp.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
         return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
       }
       return <Svg source={liveScene.source} alt="Your background" />
