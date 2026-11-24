@@ -28,7 +28,7 @@ export function glassFor(t: Theme | undefined, opts: { panels?: Panels; panelTin
 export const schemeFor = (t: Theme | undefined): 'light' | 'dark' | undefined => (t && !t.variants ? modeOf(t.palette) : undefined)
 
 /** A backdrop's scene name: letters, digits, _ and -, up to 64. */
-export const sceneName = (kind: 'gradient' | 'svg', id: string) => `prism-${kind}-${id}`.replace(/[^\w-]/g, '-').slice(0, 64)
+export const sceneName = (kind: 'gradient' | 'svg' | 'live', id: string) => `prism-${kind}-${id}`.replace(/[^\w-]/g, '-').slice(0, 64)
 
 /** Reads the scene a Backdrop hook is asked for: `scene` on newer engines, `id` before. */
 export function sceneOf(props: { scene?: unknown; id?: unknown }): string | undefined {

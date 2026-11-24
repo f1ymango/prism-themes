@@ -53,6 +53,16 @@ let colorsTaken: boolean | undefined
 let colorsSent = false
 /** A picture background drawn as an official backdrop: its scene name and SVG source, for the Backdrop hook. */
 let officialSvg: { scene: string; source: string } | undefined
+// A live wallpaper: a picture (an Svg made from the theme's video, kept in ~/.claude/prism-themes/live/<id>.svg)
+// moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
+const LIVE_THEMES = new Set(['m4a1'])
+let liveScene: { scene: string; source: string; id: string } | undefined
+async function loadLive($: EngineInterface, id: string): Promise<string | undefined> {
+  const home = await prismHome($)
+  if (!home) return undefined
+  const source = await $.fs.read(join(home, 'live', `${id}.svg`)).catch(() => undefined)
+  return typeof source === 'string' && source.length <= OFFICIAL_SVG_MAX ? source : undefined
+}
 /** /prism shadertest: an official GPU backdrop over a test picture, to see whether this Desktop plays shaders. */
 let shaderTest = false
 /** /prism shadertest layers: two full-window Svgs from ~/.claude/prism-themes/lab, the lower one under the shader. */
@@ -312,9 +322,14 @@ async function applyTheme($: EngineInterface, id: string) {
   // the background, so a failure here is a note, not an error.
   const bg = (await loadCustom($)) ?? (await themeMedia($, t))
   officialSvg = undefined
+  liveScene = undefined
   let scene: string | undefined
+  const live = !shaderTest && t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id) : undefined
   if (shaderTest) {
     scene = SHADER_TEST_SCENE
+  } else if (t && live) {
+    scene = sceneName('live', t.id)
+    liveScene = { scene, source: live, id: t.id }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
     if (typeof source === 'string') {
@@ -751,6 +766,14 @@ export const register: Register = on => {
       return <Shader module="./shader-test.ts"><Svg source={SHADER_TEST_SVG} alt="A rippling test scene" /></Shader>
     }
     if (scene === SHADER_TEST_SCENE) return <Svg source={SHADER_TEST_SVG} alt="A test scene" />
+    if (liveScene?.scene === scene) {
+      const alt = 'Your background, moving as its video does'
+      if ('Shader' in els && liveScene.id === 'm4a1') {
+        const { Shader } = els
+        return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
+      }
+      return <Svg source={liveScene.source} alt="Your background" />
+    }
     if (officialSvg?.scene === scene) return <Svg source={officialSvg.source} alt="Your background" />
     const t = allThemes().find(x => sceneName('gradient', x.id) === scene || x.id === scene)
     if (!t?.background) return next(e)

@@ -21,6 +21,7 @@ test('official route: Prism panel settings become the desktop app\'s own panel g
 
 test('official route: scene names, read under scene or id, and which errors mean an older engine', async () => {
   expect(sceneName('gradient', 'dusk')).toBe('prism-gradient-dusk')
+  expect(sceneName('live', 'm4a1')).toBe('prism-live-m4a1')
   expect(sceneOf({ scene: 'a', id: 'b' })).toBe('a')
   expect(sceneOf({ id: 'b' })).toBe('b')
   expect(isOlderEngine(new TypeError('x'))).toBe(true)
