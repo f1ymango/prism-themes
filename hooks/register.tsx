@@ -52,6 +52,15 @@ let colorsTaken: boolean | undefined
 let colorsSent = false
 /** A picture background drawn as an official backdrop: its scene name and SVG source, for the Backdrop hook. */
 let officialSvg: { scene: string; source: string } | undefined
+/** /prism shadertest: an official GPU backdrop over a test picture, to see whether this Desktop plays shaders. */
+let shaderTest = false
+const SHADER_TEST_SCENE = 'prism-shader-test'
+const SHADER_TEST_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">' +
+  '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14202a"/>' +
+  '<stop offset="0.55" stop-color="#2c4a3a"/><stop offset="1" stop-color="#6a8a4a"/></linearGradient></defs>' +
+  '<rect width="1600" height="900" fill="url(#g)"/>' +
+  Array.from({ length: 16 }, (_, i) => `<rect x="${i * 100}" y="0" width="40" height="900" fill="#ffffff" opacity="0.05"/>`).join('') +
+  '<circle cx="1150" cy="300" r="170" fill="#e8d27a" opacity="0.35"/><circle cx="420" cy="640" r="110" fill="#7ac0e8" opacity="0.25"/></svg>'
 
 let discovery: Discovery = { evidence: [] }
 let event: SessionEvent = { pulse: null, state: 'idle', stateAt: 0 }
@@ -290,7 +299,9 @@ async function applyTheme($: EngineInterface, id: string) {
   const bg = (await loadCustom($)) ?? (await themeMedia($, t))
   officialSvg = undefined
   let scene: string | undefined
-  if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
+  if (shaderTest) {
+    scene = SHADER_TEST_SCENE
+  } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
     if (typeof source === 'string') {
       scene = sceneName('svg', t?.id ?? 'claude')
@@ -453,6 +464,16 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   const bg = await loadCustom($)
   let next: CustomBackground | undefined = bg
   switch (word.toLowerCase()) {
+    case 'shadertest': {
+      const on = value.toLowerCase()
+      if (on !== 'on' && on !== 'off') return `Usage: /prism shadertest on|off — now ${shaderTest ? 'on' : 'off'}`
+      shaderTest = on === 'on'
+      await $.store.set('shaderTest', shaderTest)
+      await applyTheme($, await read($, current))
+      return shaderTest
+        ? 'Shader test on: the background should ripple gently and glow where your pointer is. /prism shadertest off ends it.'
+        : "Shader test off: the theme's own background is back."
+    }
     case 'bg': {
       if (!value) return 'Usage: /prism bg <image, SVG or video file, or a folder> — or /prism bg off'
       if (value === 'off') { next = undefined; break }
@@ -608,6 +629,7 @@ export const register: Register = on => {
       await showCustom($, await loadCustom($))
       return reloadLibrary($)
     })
+    shaderTest = (await $.store.get('shaderTest').catch(() => false)) === true
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
     stopTimer(ruleTimer)
@@ -669,6 +691,11 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     if (!scene || !('Svg' in els)) return next(e)
     const { Svg } = els
+    if (scene === SHADER_TEST_SCENE && 'Shader' in els) {
+      const { Shader } = els
+      return <Shader module="./shader-test.ts"><Svg source={SHADER_TEST_SVG} alt="A rippling test scene" /></Shader>
+    }
+    if (scene === SHADER_TEST_SCENE) return <Svg source={SHADER_TEST_SVG} alt="A test scene" />
     if (officialSvg?.scene === scene) return <Svg source={officialSvg.source} alt="Your background" />
     const t = allThemes().find(x => sceneName('gradient', x.id) === scene || x.id === scene)
     if (!t?.background) return next(e)
