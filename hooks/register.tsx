@@ -6,6 +6,8 @@ import { alertText, describeError, doctorLines, healthFile, partName, record, se
 import type { HealthLevel, HealthProblem } from '../core/health'
 import type { CustomBackground } from '../core/media'
 import { officialPalette } from '../core/colors'
+import { CENSUS_LEGEND, CENSUS_SVG } from '../core/census'
+import { CHANNEL_KINDS, cellsRate, channelProbe, type ChannelKind, type ChannelProbe } from '../core/channel'
 import { OFFICIAL_SVG_MAX, glassFor, isOlderEngine, sceneName, sceneOf, schemeFor } from '../core/official'
 import type { Glass } from '../core/official'
 import { slugOf } from '../core/removal'
@@ -56,11 +58,39 @@ let officialSvg: { scene: string; source: string } | undefined
 // A live wallpaper: a picture (an Svg made from the theme's video, kept in ~/.claude/prism-themes/live/<id>.svg)
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
-let liveScene: { scene: string; source: string; id: string } | undefined
-async function loadLive($: EngineInterface, id: string): Promise<string | undefined> {
+let liveScene: { scene: string; source: string; id: string; native: boolean } | undefined
+/** /prism native on|off: play the live wallpaper from <id>-native.svg, an Svg that moves by itself (no shader). */
+let native = false
+/**
+ * /prism probe <cells across>|off: checks that colours drawn by an Svg reach the shader exactly (hooks/probe.ts), the
+ * groundwork for carrying packed data in the Svg. The grid is stretched over the window; a centred patch is coloured.
+ */
+let probeCells = 0
+/** /prism census [shader]|off: a backdrop of 24 Svg feature tiles (core/census.ts), bare or under a passthrough shader. */
+let census = ''
+/** /prism channel <kind> [ms]|off: how many bits an Svg character carries to a shader (core/channel.ts). */
+let channel: { kind: ChannelKind; step: number } | undefined
+let channelDrawn: ChannelProbe | undefined
+const CHANNEL_SCENE = 'prism-channel'
+const CENSUS_SCENE = 'prism-census'
+const PROBE_SCENE = 'prism-probe'
+function probeSvg(n: number): string {
+  const h = Math.round(n * 0.5625), pw = Math.min(52, n), ph = Math.min(52, h)
+  const i0 = Math.floor((n - pw) / 2), j0 = Math.floor((h - ph) / 2)
+  const hex = (x: number) => (x % 256).toString(16).padStart(2, '0')
+  let body = ''
+  for (let j = j0; j < j0 + ph; j++) {
+    for (let i = i0; i < i0 + pw; i++) {
+      body += `<path fill="#${hex(37 * i + 101 * j + 11)}${hex(59 * i + 23 * j + 200)}${hex(113 * i + 71 * j + 7)}" d="M${i} ${j}h1v1h-1z"/>`
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${h}" preserveAspectRatio="none" shape-rendering="crispEdges">` +
+    `<rect width="${n}" height="${h}" fill="#202020"/>${body}</svg>`
+}
+async function loadLive($: EngineInterface, id: string, own = false): Promise<string | undefined> {
   const home = await prismHome($)
   if (!home) return undefined
-  const source = await $.fs.read(join(home, 'live', `${id}.svg`)).catch(() => undefined)
+  const source = await $.fs.read(join(home, 'live', `${id}${own ? '-native' : ''}.svg`)).catch(() => undefined)
   return typeof source === 'string' && source.length <= OFFICIAL_SVG_MAX ? source : undefined
 }
 let discovery: Discovery = { evidence: [] }
@@ -301,10 +331,17 @@ async function applyTheme($: EngineInterface, id: string) {
   officialSvg = undefined
   liveScene = undefined
   let scene: string | undefined
-  const live = t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id) : undefined
-  if (t && live) {
-    scene = sceneName('live', t.id)
-    liveScene = { scene, source: live, id: t.id }
+  const live = !channel && !probeCells && !census && t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id, native) : undefined
+  if (channel) {
+    scene = CHANNEL_SCENE
+    channelDrawn = channelProbe(channel.kind, channel.step)
+  } else if (census) {
+    scene = CENSUS_SCENE
+  } else if (probeCells) {
+    scene = PROBE_SCENE
+  } else if (t && live) {
+    scene = sceneName(native ? 'native' : 'live', t.id)
+    liveScene = { scene, source: live, id: t.id, native }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
     if (typeof source === 'string') {
@@ -468,6 +505,58 @@ async function setting($: EngineInterface, args: string): Promise<string> {
   const bg = await loadCustom($)
   let next: CustomBackground | undefined = bg
   switch (word.toLowerCase()) {
+    case 'channel': {
+      const [k = '', ms = ''] = value.toLowerCase().split(/\s+/)
+      const step = ms ? Number(ms) : 100
+      if (k !== 'off' && (!CHANNEL_KINDS.includes(k as ChannelKind) || !(Number.isInteger(step) && step >= 16 && step <= 2000))) {
+        return `Usage: /prism channel ${CHANNEL_KINDS.join('|')}|off (smil takes a moment length in ms, 16-2000; default 100) — now ${channel?.kind ?? 'off'}`
+      }
+      channel = k === 'off' ? undefined : { kind: k as ChannelKind, step }
+      await $.store.set('channel', channel ?? null)
+      await applyTheme($, await read($, current))
+      $.ui.invalidate('ui.render')
+      if (!channel || !channelDrawn) return "Channel probe off: the theme's own background is back."
+      const smil = channel.kind === 'smil'
+        ? ' (grey = not seen yet, magenta = read two different ways); the strip shows how many have arrived'
+        : ''
+      return `Channel probe on. ${channelDrawn.summary}.
+Top strip: green = every bit exact, red = some failed (white bar ~ how many, log scale); below, each item green or red${smil}.
+For comparison: ${cellsRate()}. /prism channel off ends it.`
+    }
+    case 'census': {
+      const v = value.toLowerCase() || 'bare'
+      if (!['bare', 'shader', 'off'].includes(v)) return `Usage: /prism census [shader]|off — now ${census || 'off'}`
+      census = v === 'off' ? '' : v
+      await $.store.set('census', census)
+      await applyTheme($, await read($, current))
+      $.ui.invalidate('ui.render')
+      return census ? `Census on (${census === 'shader' ? 'under a shader that inverts the right half' : 'bare Svg'}).
+${CENSUS_LEGEND}
+/prism census off ends it.`
+        : "Census off: the theme's own background is back."
+    }
+    case 'native': {
+      const v = value.toLowerCase()
+      if (!['on', 'off'].includes(v)) return `Usage: /prism native on|off — now ${native ? 'on' : 'off'}`
+      native = v === 'on'
+      await $.store.set('native', native)
+      await applyTheme($, await read($, current))
+      $.ui.invalidate('ui.render')
+      return native ? 'Native motion on: the live wallpaper plays from its own Svg (<id>-native.svg in prism-themes/live), no shader. /prism native off goes back to the shader.'
+        : 'Native motion off: the live wallpaper is moved by its shader again.'
+    }
+    case 'probe': {
+      const n = value === 'off' ? 0 : Number(value)
+      if (value !== 'off' && !(Number.isInteger(n) && n >= 2 && n <= 1024)) {
+        return `Usage: /prism probe <cells across, 2-1024>|off — now ${probeCells || 'off'}`
+      }
+      probeCells = n
+      await $.store.set('probeCells', n)
+      await applyTheme($, await read($, current))
+      $.ui.invalidate('ui.render')
+      return n ? `Probe on, ${n} cells across: a centred patch of coloured squares. Green = exact, teal = off by 1, yellow = up to 4, orange = up to 16, red = more. /prism probe off ends it.`
+        : "Probe off: the theme's own background is back."
+    }
     case 'bg': {
       if (!value) return 'Usage: /prism bg <image, SVG or video file, or a folder> — or /prism bg off'
       if (value === 'off') { next = undefined; break }
@@ -619,6 +708,13 @@ export const register: Register = on => {
       $.ui.toast('Prism\'s extension was updated. Restart Claude Desktop to load it.')
     }
     await sweepEvents($, discovery).catch(() => undefined)
+    const cs = await $.store.get('census').catch(() => '')
+    census = cs === 'bare' || cs === 'shader' ? cs : ''
+    native = (await $.store.get('native').catch(() => false)) === true
+    const ch = await $.store.get('channel').catch(() => null) as { kind?: unknown; step?: unknown } | null
+    channel = ch && CHANNEL_KINDS.includes(ch.kind as ChannelKind) && typeof ch.step === 'number' ? { kind: ch.kind as ChannelKind, step: ch.step } : undefined
+    const probe = await $.store.get('probeCells').catch(() => 0)
+    probeCells = typeof probe === 'number' && Number.isInteger(probe) && probe >= 2 && probe <= 1024 ? probe : 0
     const rule = await guard($, 'library', async () => {
       await showCustom($, await loadCustom($))
       return reloadLibrary($)
@@ -684,8 +780,35 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     if (!scene || !('Svg' in els)) return next(e)
     const { Svg } = els
+    if (scene === CHANNEL_SCENE && channel && channelDrawn) {
+      const d = channelDrawn
+      const alt = 'A data channel probe'
+      if (!('Shader' in els)) return <Svg source={d.svg} alt={alt} />
+      const { Shader } = els
+      switch (d.kind) {
+        case 'bars': return <Shader module="./channel-bars.ts"><Svg source={d.svg} alt={alt} /></Shader>
+        case 'bars-fine': return <Shader module="./channel-bars-fine.ts"><Svg source={d.svg} alt={alt} /></Shader>
+        case 'dash': return <Shader module="./channel-dash.ts"><Svg source={d.svg} alt={alt} /></Shader>
+        case 'palette': return <Shader module="./channel-palette.ts" values={d.values}><Svg source={d.svg} alt={alt} /></Shader>
+        case 'smil': return <Shader module="./channel-smil.ts" values={d.values}><Svg source={d.svg} alt={alt} /></Shader>
+      }
+    }
+    if (scene === CENSUS_SCENE && census) {
+      if (census === 'shader' && 'Shader' in els) {
+        const { Shader } = els
+        return <Shader module="./passthrough.ts"><Svg source={CENSUS_SVG} alt="Svg feature tiles" /></Shader>
+      }
+      return <Svg source={CENSUS_SVG} alt="Svg feature tiles" />
+    }
+    if (scene === PROBE_SCENE && probeCells) {
+      const source = probeSvg(probeCells)
+      if (!('Shader' in els)) return <Svg source={source} alt="A probe grid" />
+      const { Shader } = els
+      return <Shader module="./probe.ts" values={{ n: probeCells }}><Svg source={source} alt="A probe grid" /></Shader>
+    }
     if (liveScene?.scene === scene) {
       const alt = 'Your background, moving as its video does'
+      if (liveScene.native) return <Svg source={liveScene.source} alt={alt} />
       if ('Shader' in els && liveScene.id === 'm4a1') {
         const { Shader } = els
         return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
