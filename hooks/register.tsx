@@ -58,9 +58,11 @@ let officialSvg: { scene: string; source: string } | undefined
 // A live wallpaper: a picture (an Svg made from the theme's video, kept in ~/.claude/prism-themes/live/<id>.svg)
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
-let liveScene: { scene: string; source: string; id: string; native: boolean } | undefined
+let liveScene: { scene: string; source: string; id: string; native: boolean; generic: boolean } | undefined
 /** /prism native on|off: play the live wallpaper from <id>-native.svg, an Svg that moves by itself (no shader). */
 let native = false
+/** /prism livedebug on|off: the live player (hooks/live.ts) draws what it reads from the data strip on top. */
+let liveDebug = false
 /**
  * /prism probe <cells across>|off: checks that colours drawn by an Svg reach the shader exactly (hooks/probe.ts), the
  * groundwork for carrying packed data in the Svg. The grid is stretched over the window; a centred patch is coloured.
@@ -86,6 +88,20 @@ function probeSvg(n: number): string {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${h}" preserveAspectRatio="none" shape-rendering="crispEdges">` +
     `<rect width="${n}" height="${h}" fill="#202020"/>${body}</svg>`
+}
+/**
+ * The live Svg for a theme: <id>-native.svg when native motion is on; else <id>-live.svg (picture + its motion in a
+ * data strip, played by hooks/live.ts, any theme); else <id>.svg for a theme with its own motion module.
+ */
+async function findLive($: EngineInterface, id: string): Promise<{ source: string; generic: boolean } | undefined> {
+  if (native) {
+    const own = LIVE_THEMES.has(id) ? await loadLive($, id, true) : undefined
+    return own ? { source: own, generic: false } : undefined
+  }
+  const generic = await loadLive($, `${id}-live`)
+  if (generic) return { source: generic, generic: true }
+  const own = LIVE_THEMES.has(id) ? await loadLive($, id) : undefined
+  return own ? { source: own, generic: false } : undefined
 }
 async function loadLive($: EngineInterface, id: string, own = false): Promise<string | undefined> {
   const home = await prismHome($)
@@ -331,7 +347,7 @@ async function applyTheme($: EngineInterface, id: string) {
   officialSvg = undefined
   liveScene = undefined
   let scene: string | undefined
-  const live = !channel && !probeCells && !census && t && LIVE_THEMES.has(t.id) ? await loadLive($, t.id, native) : undefined
+  const live = !channel && !probeCells && !census && t ? await findLive($, t.id) : undefined
   if (channel) {
     scene = CHANNEL_SCENE
     channelDrawn = channelProbe(channel.kind, channel.step)
@@ -341,7 +357,7 @@ async function applyTheme($: EngineInterface, id: string) {
     scene = PROBE_SCENE
   } else if (t && live) {
     scene = sceneName(native ? 'native' : 'live', t.id)
-    liveScene = { scene, source: live, id: t.id, native }
+    liveScene = { scene, source: live.source, id: t.id, native, generic: live.generic }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
     if (typeof source === 'string') {
@@ -534,6 +550,14 @@ For comparison: ${cellsRate()}. /prism channel off ends it.`
 ${CENSUS_LEGEND}
 /prism census off ends it.`
         : "Census off: the theme's own background is back."
+    }
+    case 'livedebug': {
+      const v = value.toLowerCase()
+      if (!['on', 'off'].includes(v)) return `Usage: /prism livedebug on|off — now ${liveDebug ? 'on' : 'off'}`
+      liveDebug = v === 'on'
+      $.ui.invalidate('ui.render')
+      return liveDebug ? 'Live debug on. Top band: the bottom 1% of the Svg as the shader reads it (the data strip is its lower part). Under it: words collected (green; orange if the mark is wrong), then a white tick if the clock reads as ours, then the clock colour. Under that: 16 moments, green once seen. /prism livedebug off hides it.'
+        : 'Live debug off.'
     }
     case 'native': {
       const v = value.toLowerCase()
@@ -809,6 +833,10 @@ export const register: Register = on => {
     if (liveScene?.scene === scene) {
       const alt = 'Your background, moving as its video does'
       if (liveScene.native) return <Svg source={liveScene.source} alt={alt} />
+      if ('Shader' in els && liveScene.generic) {
+        const { Shader } = els
+        return <Shader module="./live.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveScene.source} alt={alt} /></Shader>
+      }
       if ('Shader' in els && liveScene.id === 'm4a1') {
         const { Shader } = els
         return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
