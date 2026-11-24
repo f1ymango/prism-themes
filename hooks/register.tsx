@@ -58,7 +58,7 @@ let officialSvg: { scene: string; source: string } | undefined
 // A live wallpaper: a picture (an Svg made from the theme's video, kept in ~/.claude/prism-themes/live/<id>.svg)
 // moved by a shader that holds that video's measured motion. Themes with a motion module ship one in hooks/.
 const LIVE_THEMES = new Set(['m4a1'])
-let liveScene: { scene: string; source: string; id: string; native: boolean; generic: boolean } | undefined
+let liveScene: { scene: string; source: string; id: string; native: boolean; generic: boolean; key: boolean } | undefined
 /** /prism native on|off: play the live wallpaper from <id>-native.svg, an Svg that moves by itself (no shader). */
 let native = false
 /** /prism livedebug on|off: the live player (hooks/live.ts) draws what it reads from the data strip on top. */
@@ -90,14 +90,17 @@ function probeSvg(n: number): string {
     `<rect width="${n}" height="${h}" fill="#202020"/>${body}</svg>`
 }
 /**
- * The live Svg for a theme: <id>-native.svg when native motion is on; else <id>-live.svg (picture + its motion in a
- * data strip, played by hooks/live.ts, any theme); else <id>.svg for a theme with its own motion module.
+ * The live Svg for a theme: <id>-native.svg when native motion is on; else <id>-key.svg (keyframe and motion both as
+ * data, played by hooks/live-key.ts); else <id>-live.svg (picture + its motion in a data strip, hooks/live.ts); else
+ * <id>.svg for a theme with its own motion module. The last three work for any theme.
  */
-async function findLive($: EngineInterface, id: string): Promise<{ source: string; generic: boolean } | undefined> {
+async function findLive($: EngineInterface, id: string): Promise<{ source: string; generic: boolean; key?: boolean } | undefined> {
   if (native) {
     const own = LIVE_THEMES.has(id) ? await loadLive($, id, true) : undefined
     return own ? { source: own, generic: false } : undefined
   }
+  const key = await loadLive($, `${id}-key`)
+  if (key) return { source: key, generic: true, key: true }
   const generic = await loadLive($, `${id}-live`)
   if (generic) return { source: generic, generic: true }
   const own = LIVE_THEMES.has(id) ? await loadLive($, id) : undefined
@@ -357,7 +360,7 @@ async function applyTheme($: EngineInterface, id: string) {
     scene = PROBE_SCENE
   } else if (t && live) {
     scene = sceneName(native ? 'native' : 'live', t.id)
-    liveScene = { scene, source: live.source, id: t.id, native, generic: live.generic }
+    liveScene = { scene, source: live.source, id: t.id, native, generic: live.generic, key: live.key === true }
   } else if (bg?.provider === 'svg' && bg.files.length === 1 && bg.files[0]!.size <= OFFICIAL_SVG_MAX) {
     const source = await $.fs.read(bg.files[0]!.path).catch(() => undefined)
     if (typeof source === 'string') {
@@ -833,6 +836,10 @@ export const register: Register = on => {
     if (liveScene?.scene === scene) {
       const alt = 'Your background, moving as its video does'
       if (liveScene.native) return <Svg source={liveScene.source} alt={alt} />
+      if ('Shader' in els && liveScene.key) {
+        const { Shader } = els
+        return <Shader module="./live-key.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveScene.source} alt={alt} /></Shader>
+      }
       if ('Shader' in els && liveScene.generic) {
         const { Shader } = els
         return <Shader module="./live.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveScene.source} alt={alt} /></Shader>
