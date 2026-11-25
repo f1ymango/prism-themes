@@ -94,9 +94,7 @@ function stageNext(): vec4 {
   // "all done" at once and the rebuild started with the decode (0.10.28-0.10.31)
   let all = 1
   for (const sl of range(96)) all = all * (D.at(vec2(sl, 0)).w > DONE - 0.5 ? 1 : 0) * (D.at(vec2(sl, 5)).w < 0.5 ? 1 : 0)
-  // debug: hold once the planes are painted, with no deblock or CDEF, to show the rebuild alone
-  const hold = v.debug > 0.5 && s > ST_P0 + 11.5 && s < ST_P0 + 12.5
-  return vec4(s > ST_DONE - 0.5 || hold ? s : s > 0.5 ? s + 1 : all > 0.5 && going() ? 1 : 0, 0, 0, 1)
+  return vec4(s > ST_DONE - 0.5 ? s : s > 0.5 ? s + 1 : all > 0.5 && going() ? 1 : 0, 0, 0, 1)
 }
 const ctl: Buffer = buffer({ size: [16, 15], float: 32, filter: 'nearest' }, q => {
   if (q.cell.y < 13.5) return vec4(seenCell(q.cell.x, q.cell.y), 0, 0, 1)
@@ -113,7 +111,7 @@ const sbStep = () => floor(rstepAll() / 4)
 const subNow = () => mod(rstepAll(), 4)
 // 64-row band b is painted at stage 164 - b, 32-row window w deblocked at 177 - w, 32-row band b CDEF'd at 202 - b
 const painting = () => stageNow() > ST_P0 - 0.5 && stageNow() < ST_P0 + 11.5
-const deblocking = () => v.debug < 0.5 && stageNow() > ST_P0 + 0.5 && stageNow() < ST_CD - 0.5
+const deblocking = () => stageNow() > ST_P0 + 0.5 && stageNow() < ST_CD - 0.5
 const win = () => ST_CD - 1 - stageNow()
 const cdefing = () => stageNow() > ST_F0 - 0.5 && stageNow() < ST_DONE - 0.5
 const fband = () => ST_DONE - 1 - stageNow()
@@ -915,7 +913,6 @@ const pic: Buffer = buffer({ size: [1280, 768], filter: 'linear', wrap: 'clamp' 
     const rr = py - (ST_P0 + 11 - st) * 64
     if (rr < -0.5 || rr > 63.5) return old
     const yv = byte(old.x)
-    if (v.debug > 0.5 && old.a < 0.2) return vec4(1, 0, 1, 1)
     // chroma sits between luma pixels: blend the four nearest (weights 1/4, 3/4: exact)
     const cx = clamp(px / 2 - 0.25, 0, 639)
     const cy = clamp(py / 2 - 0.25, 0, 383)
@@ -945,7 +942,7 @@ const pic: Buffer = buffer({ size: [1280, 768], filter: 'linear', wrap: 'clamp' 
     if (abs(sx - 20 * tc + 2 * jj - s) > 0.5) return old
     const g = (floor(sy / 4) * 4 + tc) * 4 + jj
     const wv = W.at(vec2(mod(g, 64) * 16 + X, floor(g / 64) * 16 + Y))
-    // alpha 0.4: luma rebuilt (the debug view paints pixels never rebuilt magenta)
+    // alpha 0.4: luma rebuilt, not yet painted (the picture keeps the flat colour until then)
     return wv.w > 0.5 ? vec4(wv.x / 255, old.y, old.z, 0.4) : old
   }
   if (px > 639.5 || py > 383.5) return old
@@ -996,31 +993,7 @@ export default shader({
     const c = pic.sample(vec2(p.x - d.x, (CH - PH) / CH + ((p.y + d.y) * PH) / CH))
     const flat = scene.sample(vec2(0.99, 0.02))
     const img = c.a > 0.5 ? vec3(c.x, c.y, c.z) : vec3(flat.x, flat.y, flat.z)
-    // debug: the whole picture small in the bottom-left (magenta: never painted)
-    if (v.debug > 0.5 && q.uv.x < 0.25 && q.uv.y > 0.05 && q.uv.y < 0.3) {
-      const tn = pic.sample(vec2(q.uv.x / 0.25, (CH - PH) / CH + (((q.uv.y - 0.05) / 0.25) * PH) / CH))
-      return tn.a > 0.5 ? vec4(tn.x, tn.y, tn.z, 1) : vec4(0.6, 0, 0.6, 1)
-    }
-    if (v.debug < 0.5 || q.uv.y < 0.45 || (q.uv.y < 0.9 && q.uv.x > 0.25)) return vec4(img.x, img.y, img.z, 1)
-    // debug map (left quarter): a row per slice (Y 0-47, Co 48-71, Cg 72-95): a white bar, the steps it recorded (of
-    // 4096); past the row, a box: green if the decoder ended 22..23 bits past the next slice's
-    // start, red if not, yellow while it decodes; orange row: more steps than P holds
-    if (q.uv.y < 0.88) {
-      const sl = clamp(floor(((0.88 - q.uv.y) / 0.43) * 96), 0, 95)
-      const gx = floor((q.uv.x / 0.25) * 84)
-      const nsb = sl < 47.5 ? 80 : 40
-      const s0 = D.at(vec2(sl, 0))
-      const steps = D.at(vec2(sl, 5)).x
-      if (gx > 81.5) {
-        if (sl > 94.5) return vec4(0.15, 0.15, 0.15, 1)
-        const dd = s0.z - signed(at(1024 + sl + 1))
-        const box = s0.w < DONE - 0.5 ? vec3(1, 0.85, 0.1) : dd > 21.5 && dd < 23.5 ? vec3(0.1, 0.8, 0.2) : vec3(0.9, 0.1, 0.1)
-        return vec4(box.x, box.y, box.z, 1)
-      }
-      if (gx > nsb - 0.5) return vec4(0.15, 0.15, 0.15, 1)
-      // the slice's steps (P holds 4096) as a bar, white; orange if past
-      return steps > 4095.5 ? vec4(1, 0.5, 0, 1) : gx < (steps / 4096) * 80 ? vec4(0.9, 0.9, 0.9, 1) : vec4(0.15, 0.15, 0.15, 1)
-    }
+    if (v.debug < 0.5 || q.uv.y < 0.9) return vec4(img.x, img.y, img.z, 1)
     // debug strip: words seen (green, top), then the stage (yellow while decoding, white after, growing)
     const r = ctl.at(vec2(1, 14))
     const st = stageNow()
