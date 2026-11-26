@@ -173,6 +173,14 @@ The full format, with stylesheets and the attributes they can react to, is in
 [skills/make-theme/SKILL.md](skills/make-theme/SKILL.md). [examples/](examples/) has a light/dark theme and a
 `rules.json` that picks themes by project folder and time of day (it goes in `.claude\prism-themes\`).
 
+### Live wallpapers
+
+Ask Claude to "make this a live wallpaper" with a video (or a picture). The `make-live-wallpaper` skill runs a
+converter in stages (probe, keyframe, loop, motion, encode, theme), shows you a report with pictures after each
+one so a wrong loop or motion can be fixed before the long encode, and installs the result when you say so. It
+needs Node 22+ and ffmpeg. The stages can also be run by hand; see
+[skills/make-live-wallpaper/SKILL.md](skills/make-live-wallpaper/SKILL.md) and the top of its `scripts/pipeline.mjs`.
+
 Secondary and muted text always keep a WCAG AA contrast (4.5:1) against the theme's background, whatever the palette.
 
 To remove a theme of yours, run `/prism remove <id>`. The display name works too, in any case
