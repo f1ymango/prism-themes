@@ -988,8 +988,8 @@ function thumbCell(cx: number, cy: number): vec4 {
   let n = 0
   for (let i = 0; i < 60; i++) n = n + acc.at(vec2(i, 9)).a
   const flag = signed(at(11)) === THB && n > 59.5 ? -2 : -1
-  const u = (cx + 0.5) / 24
-  const v = 1 - (cy + 0.5) / 14
+  const u = (cx + 0.5) / 48
+  const v = 1 - (cy + 0.5) / 28
   const x = u * 16 - 0.5
   const y = v * 10 - 0.5
   const xc = u * 8 - 0.5
@@ -1009,29 +1009,119 @@ function thumbCell(cx: number, cy: number): vec4 {
   return vec4(clamp((ly + co - cg) / 255, 0, 1), clamp((ly + cg) / 255, 0, 1), clamp((ly - co - cg) / 255, 0, 1), flag)
 }
 
-const sway: Buffer = buffer({ size: [24, 14], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
-  if (!done()) return thumbCell(q.cell.x, q.cell.y)
-  const n = (13 - q.cell.y) * 24 + q.cell.x
+// --- motion v2 (converter: notes/live-converter/mv2.mjs) -----------------------------------------------------------
+// Word 12 'MV2' marks it; 13 the layout g << 19 | K << 15 | T << 8 | WB << 4 | CB (g 1: a 48 x 28 grid, else 24 x 14);
+// 14 the block's words MW. Block word i is at 16 + i, from 1008 on at WORDS - MW + i: K scales * 4096, the still mask
+// in groups of 12 nodes (moving nodes before the group << 12 | 12 bits, first node at bit 11), K x T curve samples (CB
+// bits), then for each moving node 2K weights (WB bits: x for every curve, then y). A curve is played by periodic
+// Catmull-Rom over its samples, less its first sample, so frame 0 is the keyframe. Old Svgs carry three harmonics a
+// node of a 24 x 14 grid in 16..1023 instead. Either way MN holds each node's displacement this frame (pixels of the
+// motion frame) and sway interpolates the nodes bilinearly at its own 48 x 28 cells.
+const MV2 = 5068338
+const isV2 = () => signed(at(12)) === MV2
+const lay = (shift: number, mask: number) => unsigned(int((at(13) >> int(shift)) & int(mask)))
+const gridX = () => (isV2() && lay(19, 1) > 0.5 ? 48 : 24)
+const gridY = () => (isV2() && lay(19, 1) > 0.5 ? 28 : 14)
+const mword = (i: number): Int => at(i < 1007.5 ? 16 + i : WORDS - signed(at(14)) + i)
+/** n bits (1..24) from bit p of the motion block's bit run that starts at block word w0 */
+function mbits(w0: number, p: number, n: number): number {
+  const w = floor((p + 0.5) / 24)
+  const o = p - w * 24
+  const hi = mword(w0 + w)
+  const lo = mword(min(w0 + w + 1, signed(at(14)) - 1))
+  const tail = o > 15.5 ? int(lo << int(o - 16)) : int(lo >>> int(16 - o))
+  return unsigned(int(int(int(hi << int(8 + o)) | tail) >>> int(32 - n)))
+}
+const maskWords = () => floor((gridX() * gridY() + 11) / 12)
+/** MC: each curve's value now, less its value at the loop's start */
+const MC: Buffer = buffer({ size: [8, 1], float: 32, filter: 'nearest' }, q => {
+  const K = lay(15, 15)
+  if (!done() || !isV2() || q.cell.x > K - 0.5) return vec4(0)
+  const T = lay(8, 127)
+  const CB = lay(0, 15)
+  const CL = qPow(CB - 1) - 1
+  const c0 = K + maskWords()
   const loop = max(signed(at(4)), 1000) / 1000
-  const fw = max(signed(at(6)), 1)
-  const fh = max(signed(at(7)), 1)
-  const ph = (time * (1 - still) * 6.2831853) / loop
+  const tt = mod((time * (1 - still)) / loop, 1) * T
+  const i = floor(tt)
+  const a = tt - i
+  const s = (j: number) => (mbits(c0, (q.cell.x * T + imod(i + j + T, T)) * CB, CB) - CL) / CL
+  const p0 = s(-1)
+  const p1 = s(0)
+  const p2 = s(1)
+  const p3 = s(2)
+  const u = 0.5 * (2 * p1 + (p2 - p0) * a + (2 * p0 - 5 * p1 + 4 * p2 - p3) * a * a + (3 * p1 - p0 - 3 * p2 + p3) * a * a * a)
+  return vec4(u - (mbits(c0, q.cell.x * T * CB, CB) - CL) / CL, 0, 0, 1)
+})
+/** MN: node (i, j) (j from the top) of the motion grid: its displacement now, in pixels of the motion frame */
+const MN: Buffer = buffer({ size: [48, 28], float: 32, filter: 'nearest' }, q => {
+  const i = q.cell.x
+  const j = q.cell.y
+  if (!done() || i > gridX() - 0.5 || j > gridY() - 0.5) return vec4(0)
+  if (!isV2()) {
+    const n = j * 24 + i
+    const loop = max(signed(at(4)), 1000) / 1000
+    const ph = (time * (1 - still) * 6.2831853) / loop
+    let ox = 0
+    let oy = 0
+    for (const h of [1, 2, 3]) {
+      const w = at(16 + n * 3 + h - 1)
+      const k = signed(at(h)) / 65536 / 31
+      const c = cos(ph * h) - 1
+      const s = sin(ph * h)
+      ox = ox + (field(w, 18) * c + field(w, 12) * s) * k
+      oy = oy + (field(w, 6) * c + field(w, 0) * s) * k
+    }
+    return vec4(ox, oy, 0, 1)
+  }
+  const n = j * gridX() + i
+  const K = lay(15, 15)
+  const T = lay(8, 127)
+  const WB = lay(4, 15)
+  const CB = lay(0, 15)
+  const g = floor((n + 0.5) / 12)
+  const r = n - g * 12
+  const mw = mword(K + g)
+  if (unsigned(int((mw >> int(11 - r)) & 1)) < 0.5) return vec4(0)
+  let rank = unsigned(int(mw >> 12))
+  for (const t of range(12)) rank = rank + (t < r - 0.5 ? unsigned(int((mw >> int(11 - t)) & 1)) : 0)
+  const WL = qPow(WB - 1) - 1
+  const w0 = K + maskWords() + floor((K * T * CB + 23) / 24)
+  const p0 = rank * 2 * K * WB
   let dx = 0
   let dy = 0
-  for (const h of [1, 2, 3]) {
-    const w = at(16 + n * 3 + h - 1)
-    const k = signed(at(h)) / 65536 / 31
-    const c = cos(ph * h) - 1
-    const s = sin(ph * h)
-    dx = dx + ((field(w, 18) * c + field(w, 12) * s) * k) / fw
-    dy = dy + ((field(w, 6) * c + field(w, 0) * s) * k) / fh
+  for (const k of range(8)) {
+    const on = k < K - 0.5
+    const sc = on ? signed(mword(k)) / 4096 / WL : 0
+    const u = MC.at(vec2(k, 0)).x
+    dx = dx + (on ? (mbits(w0, p0 + k * WB, WB) - WL) * sc * u : 0)
+    dy = dy + (on ? (mbits(w0, p0 + (K + k) * WB, WB) - WL) * sc * u : 0)
   }
   return vec4(dx, dy, 0, 1)
+})
+const sway: Buffer = buffer({ size: [48, 28], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
+  if (!done()) return thumbCell(q.cell.x, q.cell.y)
+  const gx = gridX()
+  const gy = gridY()
+  // the cell's centre in node units (rows from the top), clamped to the outer nodes
+  const nu = clamp(((q.cell.x + 0.5) / 48) * gx - 0.5, 0, gx - 1)
+  const nv = clamp((1 - (q.cell.y + 0.5) / 28) * gy - 0.5, 0, gy - 1)
+  const i0 = min(gx - 2, floor(nu))
+  const j0 = min(gy - 2, floor(nv))
+  const fu = nu - i0
+  const fv = nv - j0
+  const a = MN.at(vec2(i0, j0))
+  const b = MN.at(vec2(i0 + 1, j0))
+  const c = MN.at(vec2(i0, j0 + 1))
+  const e = MN.at(vec2(i0 + 1, j0 + 1))
+  const dx = (a.x * (1 - fu) + b.x * fu) * (1 - fv) + (c.x * (1 - fu) + e.x * fu) * fv
+  const dy = (a.y * (1 - fu) + b.y * fu) * (1 - fv) + (c.y * (1 - fu) + e.y * fu) * fv
+  return vec4(dx / max(signed(at(6)), 1), dy / max(signed(at(7)), 1), 0, 1)
 })
 
 export default shader({
   fps: 30,
-  passes: [acc, ctl, Q, D, P, HC, EDG, CD, CF, TH, W, dbH, dbV, pic, sway, picture(q => {
+  passes: [acc, ctl, Q, D, P, HC, EDG, CD, CF, TH, W, dbH, dbV, pic, MC, MN, sway, picture(q => {
     const pa = signed(at(5)) / 1000000
     const a = pa > 0.1 ? pa : 1.684
     const aspect = size.x / size.y
