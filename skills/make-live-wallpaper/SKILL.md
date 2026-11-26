@@ -20,15 +20,15 @@ inside the plugin.
   install it (`winget install Gyan.FFmpeg` on Windows, `brew install ffmpeg` on macOS) and wait for a yes.
 - Ask for the wallpaper file if you do not have it, and for a short id (lower-case, dashes) and a display name.
 
-## 2. Make the project and run up to motion
+## 2. Make the project and run up to layers
 
 ```
 node $S/pipeline.mjs new "<wallpaper>" <id> --name "<Name>" --out "<folder>"
-node $S/pipeline.mjs run "<folder>" --to motion
+node $S/pipeline.mjs run "<folder>" --to layers
 ```
 
-This takes about a minute. Stop here and read `REPORT.md` (and its pictures, with the Read tool) before the long
-encode, so a wrong loop or motion costs a minute, not fifteen.
+This takes a few minutes (most of it the layers stage). Stop here and read `REPORT.md` (and its pictures, with the
+Read tool) before the encode, so a wrong loop, motion or outline is caught before the longest step.
 
 ## 3. Read the report and fix the stage that missed
 
@@ -38,6 +38,8 @@ encode, so a wrong loop or motion costs a minute, not fifteen.
 | keyframe | `report/keyframe.png`: the picture that will show | same as probe; the first frame is used, so trim the start (`ffmpeg -ss`) if it is a fade-in |
 | loop | the length found; `report/loop-seam.png`: last frame, first frame, difference (should be near black) | `run <folder> --loop <seconds>` or `--loop whole` |
 | motion | `report/motion-map.png` (orange = moves); moving error against the no-motion error | `--motion-words 1500` gives motion more room (the picture loses a little); content that appears instead of moving (a curtain opening) cannot be fixed by options |
+| layers | `report/layers.png` (each part that moves on its own, tinted, outline white); `report/layers-compare.png` (real, one field, layered at the parts' largest move: what is beside a part should stay straight in the third) | an outline that misses part of the thing or takes in background: paint over `work/layers/mask.png` (black = background, the part's colour = the part, keep 1280 x 760; offer to do it with the person, or let them use any paint program), then `run <folder> --layers mask`. A part found where nothing should move on its own, or layers making it worse: `--layers off` |
+| light | `report/light.png` (the middle of the loop: real, motion only, motion and light); the moving error with and without it | light is a brightness change on a coarse grid, for sweeping light, glare and shadows that a warp cannot draw; it is kept only when it pays for its words, and only with one motion field (layers on leave it out). If it looks wrong (a part flickering dark or bright): `--light off` |
 | encode | `report/decoded.png` against `keyframe.png`; "decodes exactly" | a mismatch is a codec bug: stop, keep the folder, report it |
 | theme | the colours | `run <folder> --name "..."`; colours can be changed in `themes/<id>.json` by hand |
 
@@ -51,8 +53,9 @@ says where things stand and what to do next. A failed stage says why in plain wo
 node $S/pipeline.mjs run "<folder>"
 ```
 
-The keyframe encode takes about 13 minutes; run it in the background and tell the person. (`--quick on` encodes in
-under a minute at lower quality, for checking only; install refuses a quick encode unless `--force`.)
+The keyframe encode spreads over the machine's cores: about 3 minutes with 12 or more threads, up to a quarter of an
+hour on one; run it in the background and tell the person. (`--quick on` encodes in under a minute at lower quality,
+for checking only; install refuses a quick encode unless `--force`.)
 
 ## 5. Install, with the person's OK
 
@@ -66,7 +69,9 @@ It copies the keyframe, theme and background into `~/.claude/prism-themes/`, kee
 replaces. Then the person must, on Windows, have Transparency effects and Animation effects on (Settings), quit
 Claude Desktop fully and start it again, and type `/prism use <id>`. The sharp picture draws a few seconds after a
 blurred preview; after a quick restart it can take up to about 5 minutes (Desktop pauses wallpapers after an
-unclean stop). If it still looks wrong, `/prism startlog` shows what happened at start-up.
+unclean stop). If it still looks wrong, `/prism startlog` shows what happened at start-up. While visible, a live
+wallpaper keeps the GPU busy (about half of an integrated GPU). `/prism motion off` holds it still and
+`/prism motion on` brings the motion back; holding still does not lower the GPU cost.
 
 ## Rules
 

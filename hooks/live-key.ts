@@ -14,10 +14,10 @@
 // bottom up (the chroma planes sit in the top rows, so they outlast their use), 154..177 deblock a 32-row window a
 // frame, 178 CDEF directions (CD), 179..202 CDEF a 32-row band a frame from the bottom up, 203 done. Until a band is painted the
 // window shows the loading preview the parcel carries (blurred, see thumbCell), or without one the Svg's flat colour.
-import { abs, buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, still, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
+import { abs, buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, sqrt, still, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
 
 // /prism livedebug: 1 draws the decoder's progress over the top of the window
-const v = values({ debug: [0, 1] })
+const v = values({ debug: [0, 1], hold: [0, 1] }) // hold 1: motion off (/prism motion off), the clock stays at 0 (the picture holds its first frame)
 
 const CELLS = 128
 const MOMENTS = 110
@@ -72,7 +72,9 @@ const at = (s: number): Int => word(acc.at(vec2(s - floor(s / CELLS) * CELLS, fl
 function imod(a: number, n: number): number {
   return a - n * floor((a + 0.5) / n)
 }
-// control: rows 0..13 the words seen in each 8 x 8 cells of acc; row 14: x 0 the stage, x 1 ready
+// control: rows 0..13 the words seen in each 8 x 8 cells of acc; row 14: x 0 the stage, x 1 ready, x 2 and 3 the motion
+// header and the preview's flag (motionHead), x 8..15 light curve k's value now (curveNow); row 15: x 0..7 curve k's value now (curveNow), x 8..12 the outline vertices of this frame's
+// edges (vertexNow). Decoded here once a frame so the big passes read a texel instead of assembling words.
 function seenCell(cx: number, cy: number): number {
   let n = 0
   for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) {
@@ -96,9 +98,13 @@ function stageNext(): vec4 {
   for (const sl of range(96)) all = all * (D.at(vec2(sl, 0)).w > DONE - 0.5 ? 1 : 0) * (D.at(vec2(sl, 5)).w < 0.5 ? 1 : 0)
   return vec4(s > ST_DONE - 0.5 ? s : s > 0.5 ? s + 1 : all > 0.5 && going() ? 1 : 0, 0, 0, 1)
 }
-const ctl: Buffer = buffer({ size: [16, 15], float: 32, filter: 'nearest' }, q => {
+const ctl: Buffer = buffer({ size: [16, 16], float: 32, filter: 'nearest' }, q => {
+  // one call site for both kinds of curve (each call is inlined, and the shader is near its step limit)
+  const lightCurve = q.cell.y > 13.5 && q.cell.y < 14.5 && q.cell.x > 7.5
+  if ((q.cell.y > 14.5 && q.cell.x < 7.5) || lightCurve) return curveNow(lightCurve ? q.cell.x - 8 : q.cell.x, lightCurve ? 1 : 0)
+  if (q.cell.y > 14.5) return vertexNow(q.cell.x - 8)
   if (q.cell.y < 13.5) return vec4(seenCell(q.cell.x, q.cell.y), 0, 0, 1)
-  if (q.cell.x > 1.5) return vec4(0)
+  if (q.cell.x > 1.5) return motionHead(q.cell.x - 2)
   return q.cell.x > 0.5 ? readyNow() : stageNext()
 })
 const stageNow = () => ctl.at(vec2(0, 14)).x
@@ -962,9 +968,9 @@ const field = (w: Int, shift: number) => {
 }
 // --- the loading preview (converter: notes/live-converter/thumb.mjs) ------------------------------------------------
 // Word 11 'THB' says it is there: luma 16 x 10 in words 1152..1191 (6 bits, 4 a word, row 0 at the top), chroma 8 x 5
-// in 1192..1211 (Co 6 + Cg 6 bits, 2 a word). Until the motion starts, sway holds the preview instead of the motion:
+// in 1192..1211 (Co 6 + Cg 6 bits, 2 a word). Until the motion starts, MN holds the preview instead of the motion:
 // in each cell the preview's colour at the cell's centre through a cubic B-spline (luma and chroma each over their own
-// grid), so the picture pass's one linear sample of sway is already a smooth blur; lane w -2 once the preview has
+// grid), so LD's bilinear read and the picture pass's linear sample of LD are already a smooth blur; lane w -2 once the preview has
 // arrived, else -1 (the same in every cell, so filtering keeps it).
 const THB = 5523522
 const TY0 = 1152
@@ -985,9 +991,7 @@ function bspl(d: number): number {
   return a < 1 ? (4 - 6 * a * a + 3 * a * a * a) / 6 : ((2 - a) * (2 - a) * (2 - a)) / 6
 }
 function thumbCell(cx: number, cy: number): vec4 {
-  let n = 0
-  for (let i = 0; i < 60; i++) n = n + acc.at(vec2(i, 9)).a
-  const flag = signed(at(11)) === THB && n > 59.5 ? -2 : -1
+  const flag = ctl.at(vec2(4, 14)).x
   const u = (cx + 0.5) / 48
   const v = 1 - (cy + 0.5) / 28
   const x = u * 16 - 0.5
@@ -1009,20 +1013,29 @@ function thumbCell(cx: number, cy: number): vec4 {
   return vec4(clamp((ly + co - cg) / 255, 0, 1), clamp((ly + cg) / 255, 0, 1), clamp((ly - co - cg) / 255, 0, 1), flag)
 }
 
-// --- motion v2 (converter: notes/live-converter/mv2.mjs) -----------------------------------------------------------
-// Word 12 'MV2' marks it; 13 the layout g << 19 | K << 15 | T << 8 | WB << 4 | CB (g 1: a 48 x 28 grid, else 24 x 14);
-// 14 the block's words MW. Block word i is at 16 + i, from 1008 on at WORDS - MW + i: K scales * 4096, the still mask
-// in groups of 12 nodes (moving nodes before the group << 12 | 12 bits, first node at bit 11), K x T curve samples (CB
-// bits), then for each moving node 2K weights (WB bits: x for every curve, then y). A curve is played by periodic
-// Catmull-Rom over its samples, less its first sample, so frame 0 is the keyframe. Old Svgs carry three harmonics a
-// node of a 24 x 14 grid in 16..1023 instead. Either way MN holds each node's displacement this frame (pixels of the
-// motion frame) and sway interpolates the nodes bilinearly at its own 48 x 28 cells.
+// --- motion v2 (converter: skills/make-live-wallpaper/scripts/mv2.mjs) ---------------------------------------------
+// Word 12 'MV2' marks it; 13 the layout L << 20 | g << 19 | K << 15 | T << 8 | WB << 4 | CB (g 1: a 48 x 28 grid, else
+// 24 x 14; L 1: layered, see below); 14 the block's words MW. Block word i is at 16 + i, from 1008 on at WORDS - MW + i:
+// K scales * 4096, the still mask in groups of 12 nodes (moving nodes before the group << 12 | 12 bits, first node at
+// bit 11), K x T curve samples (CB bits), then for each moving node 2K weights (WB bits: x for every curve, then y). A
+// curve is played by periodic Catmull-Rom over its samples, less its first sample, so frame 0 is the keyframe. Old Svgs
+// carry three harmonics a node of a 24 x 14 grid in 16..1023 instead. Either way MN holds each node's displacement this
+// frame (pixels of the motion frame) and LD turns the nodes into the displacement the picture pass samples.
+// Layered (L 1, converter: scripts/layers.mjs): the moving parts (a head, a sleeve...) get a field of their own, so the
+// background beside them stays put. Nodes are two 48 x 28 grids, the background's then the parts' (MN rows 28..55),
+// sharing the curves. The parts' outline is closed polygons in the block: word 1 = first vertex's block word << 12 |
+// vertex count; a vertex word is x (bits 0..10, picture pixels of 1280 x 760) | y << 11 (from the top) | 1 << 21 when
+// its loop ends there (no edge to the next vertex; a loop repeats its first vertex at its end). Word 2 = rim << 16 |
+// band << 8 | lead, in eighths of a pixel, see LD.
 const MV2 = 5068338
 const isV2 = () => signed(at(12)) === MV2
 const lay = (shift: number, mask: number) => unsigned(int((at(13) >> int(shift)) & int(mask)))
+const layered = () => isV2() && lay(20, 1) > 0.5
 const gridX = () => (isV2() && lay(19, 1) > 0.5 ? 48 : 24)
 const gridY = () => (isV2() && lay(19, 1) > 0.5 ? 28 : 14)
+const nodesY = () => (layered() ? 56 : gridY())
 const mword = (i: number): Int => at(i < 1007.5 ? 16 + i : WORDS - signed(at(14)) + i)
+const wbits = (w: Int, shift: number, mask: number) => unsigned(int((w >> int(shift)) & int(mask)))
 /** n bits (1..24) from bit p of the motion block's bit run that starts at block word w0 */
 function mbits(w0: number, p: number, n: number): number {
   const w = floor((p + 0.5) / 24)
@@ -1032,36 +1045,78 @@ function mbits(w0: number, p: number, n: number): number {
   const tail = o > 15.5 ? int(lo << int(o - 16)) : int(lo >>> int(16 - o))
   return unsigned(int(int(int(hi << int(8 + o)) | tail) >>> int(32 - n)))
 }
-const maskWords = () => floor((gridX() * gridY() + 11) / 12)
-/** MC: each curve's value now, less its value at the loop's start */
-const MC: Buffer = buffer({ size: [8, 1], float: 32, filter: 'nearest' }, q => {
-  const K = lay(15, 15)
-  if (!done() || !isV2() || q.cell.x > K - 0.5) return vec4(0)
-  const T = lay(8, 127)
-  const CB = lay(0, 15)
+const maskWords = () => floor((gridX() * nodesY() + 11) / 12)
+/** ctl (2, 14): layered (0/1), grid x, grid y, lead; (3, 14): motion-frame pixels to picture pixels x and y, rim,
+ * band; (4, 14): x the preview's flag (thumbCell); (5, 14): the light's header (lightHead); (6, 14) and (7, 14): the
+ * light's and the motion's decoder for MN (K, WB, mask word, weights word) */
+function motionHead(k: number): vec4 {
+  if (k < 0.5) return vec4(layered() ? 1 : 0, gridX(), gridY(), wbits(at(2), 0, 255) / 8)
+  if (k < 1.5) return vec4(1280 / max(signed(at(6)), 1), 760 / max(signed(at(7)), 1), wbits(at(2), 16, 255) / 8, wbits(at(2), 8, 255) / 8)
+  if (k > 4.5) { // x 7: the motion's decoder for MN: K, WB, its mask's first block word, its weights' first word
+    const K = lay(15, 15)
+    return isV2() ? vec4(K, lay(4, 15), K, K + maskWords() + floor((K * lay(8, 127) * lay(0, 15) + 23) / 24)) : vec4(0)
+  }
+  if (k > 2.5) { // x 5: the light's K, WB, CB, first block word; x 6: as x 7, for the light
+    const w = at(3)
+    const K = wbits(w, 20, 7)
+    const CB = wbits(w, 12, 15)
+    const first = wbits(w, 0, 4095)
+    if (!isV2() || wbits(w, 23, 1) < 0.5) return vec4(0)
+    return k < 3.5 ? vec4(K, wbits(w, 16, 15), CB, first) : vec4(K, wbits(w, 16, 15), first + K, first + K + 28 + floor((K * LT * CB + 23) / 24))
+  }
+  let n = 0
+  for (let i = 0; i < 60; i++) n = n + acc.at(vec2(i, 9)).a
+  return vec4(signed(at(11)) === THB && n > 59.5 ? -2 : -1, 0, 0, 1)
+}
+const head0 = () => ctl.at(vec2(2, 14))
+const head1 = () => ctl.at(vec2(3, 14))
+// The light term (light.mjs): an additive grey offset on its own 24 x 14 grid, in MV2's form, its block after the
+// motion's: word 3 = 1 << 23 | K << 20 | WB << 16 | CB << 12 | its first block word; T is always 32 samples a loop.
+// Its nodes live in MN's corner x 24..47, y 42..55, free in every layout but layered 48 x 28 (which then has no light).
+const LT = 32
+/** ctl (5, 14): the light's K (0: none), WB, CB, first block word, decoded once a frame (word reads are dear) */
+const lightHead = () => ctl.at(vec2(5, 14))
+const lightMaskWords = () => 28 // 24 x 14 nodes, 12 a word
+/** ctl row 15 (L 0: the motion's curves) or row 14 x 8.. (L 1: the light's): x curve k's value now, less its value at
+ * the loop's start; y that times the curve's weight scale (scale / 4096 / WL), what MN multiplies a weight by */
+function curveNow(k: number, L: number): vec4 {
+  const lh = lightHead()
+  const K = L > 0.5 ? lh.x : lay(15, 15)
+  if (!done() || !isV2() || k > K - 0.5) return vec4(0)
+  const T = L > 0.5 ? LT : lay(8, 127)
+  const CB = L > 0.5 ? lh.z : lay(0, 15)
   const CL = qPow(CB - 1) - 1
-  const c0 = K + maskWords()
+  const c0 = L > 0.5 ? lh.w + K + lightMaskWords() : K + maskWords()
   const loop = max(signed(at(4)), 1000) / 1000
-  const tt = mod((time * (1 - still)) / loop, 1) * T
+  const tt = mod((time * (1 - still) * (1 - v.hold)) / loop, 1) * T
   const i = floor(tt)
   const a = tt - i
-  const s = (j: number) => (mbits(c0, (q.cell.x * T + imod(i + j + T, T)) * CB, CB) - CL) / CL
+  const s = (j: number) => (mbits(c0, (k * T + imod(i + j + T, T)) * CB, CB) - CL) / CL
   const p0 = s(-1)
   const p1 = s(0)
   const p2 = s(1)
   const p3 = s(2)
   const u = 0.5 * (2 * p1 + (p2 - p0) * a + (2 * p0 - 5 * p1 + 4 * p2 - p3) * a * a + (3 * p1 - p0 - 3 * p2 + p3) * a * a * a)
-  return vec4(u - (mbits(c0, q.cell.x * T * CB, CB) - CL) / CL, 0, 0, 1)
-})
-/** MN: node (i, j) (j from the top) of the motion grid: its displacement now, in pixels of the motion frame */
-const MN: Buffer = buffer({ size: [48, 28], float: 32, filter: 'nearest' }, q => {
-  const i = q.cell.x
-  const j = q.cell.y
-  if (!done() || i > gridX() - 0.5 || j > gridY() - 0.5) return vec4(0)
+  const du = u - (mbits(c0, k * T * CB, CB) - CL) / CL
+  const WB = L > 0.5 ? lh.y : lay(4, 15)
+  const sc = signed(mword((L > 0.5 ? lh.w : 0) + k)) / 4096 / (qPow(WB - 1) - 1)
+  return vec4(du, du * sc, 0, 1)
+}
+/** MN: node (i, j) (j from the top; layered: rows 28.. the parts' grid) of the motion: its displacement now, in pixels
+ * of the motion frame; x 24.., y 42.. node (i - 24, j - 42) of the light (24 x 14): x its offset now (of 1).
+ * Until the picture is done, cells (i, j < 28) hold the loading preview instead (thumbCell, j from the bottom), for LD.
+ * Filtered linearly: LD reads a field between four nodes with one sample. Motion and light share one decoder path. */
+const MN: Buffer = buffer({ size: [48, 56], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
+  const L = q.cell.x > 23.5 && q.cell.y > 41.5 && ctl.at(vec2(6, 14)).x > 0.5
+  const i = L ? q.cell.x - 24 : q.cell.x
+  const j = L ? q.cell.y - 42 : q.cell.y
+  if (!done()) return q.cell.y < 27.5 ? thumbCell(i, j) : vec4(0)
+  const h0 = head0() // layered, grid x, grid y
+  if (!L && (i > h0.y - 0.5 || j > (h0.x > 0.5 ? 56 : h0.z) - 0.5)) return vec4(0)
   if (!isV2()) {
     const n = j * 24 + i
     const loop = max(signed(at(4)), 1000) / 1000
-    const ph = (time * (1 - still) * 6.2831853) / loop
+    const ph = (time * (1 - still) * (1 - v.hold) * 6.2831853) / loop
     let ox = 0
     let oy = 0
     for (const h of [1, 2, 3]) {
@@ -1074,68 +1129,162 @@ const MN: Buffer = buffer({ size: [48, 28], float: 32, filter: 'nearest' }, q =>
     }
     return vec4(ox, oy, 0, 1)
   }
-  const n = j * gridX() + i
-  const K = lay(15, 15)
-  const T = lay(8, 127)
-  const WB = lay(4, 15)
-  const CB = lay(0, 15)
+  const n = j * (L ? 24 : h0.y) + i
+  const pr = L ? ctl.at(vec2(6, 14)) : ctl.at(vec2(7, 14)) // K, WB, the mask's first word, the weights' (ctl decodes them)
+  const K = pr.x
+  const WB = pr.y
   const g = floor((n + 0.5) / 12)
   const r = n - g * 12
-  const mw = mword(K + g)
+  const mw = mword(pr.z + g)
   if (unsigned(int((mw >> int(11 - r)) & 1)) < 0.5) return vec4(0)
   let rank = unsigned(int(mw >> 12))
   for (const t of range(12)) rank = rank + (t < r - 0.5 ? unsigned(int((mw >> int(11 - t)) & 1)) : 0)
   const WL = qPow(WB - 1) - 1
-  const w0 = K + maskWords() + floor((K * T * CB + 23) / 24)
-  const p0 = rank * 2 * K * WB
+  const w0 = pr.w
+  const p0 = rank * (L ? 1 : 2) * K * WB
   let dx = 0
   let dy = 0
   for (const k of range(8)) {
     const on = k < K - 0.5
-    const sc = on ? signed(mword(k)) / 4096 / WL : 0
-    const u = MC.at(vec2(k, 0)).x
-    dx = dx + (on ? (mbits(w0, p0 + k * WB, WB) - WL) * sc * u : 0)
-    dy = dy + (on ? (mbits(w0, p0 + (K + k) * WB, WB) - WL) * sc * u : 0)
+    const cu = L ? ctl.at(vec2(8 + k, 14)).y : ctl.at(vec2(k, 15)).y // the curve now times its scale
+    dx = dx + (on ? (mbits(w0, p0 + k * WB, WB) - WL) * cu : 0)
+    dy = dy + (on && !L ? (mbits(w0, p0 + (K + k) * WB, WB) - WL) * cu : 0)
   }
-  return vec4(dx, dy, 0, 1)
+  return L ? vec4(dx / 255, 0, 0, 1) : vec4(dx, dy, 0, 1)
 })
-const sway: Buffer = buffer({ size: [48, 28], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
-  if (!done()) return thumbCell(q.cell.x, q.cell.y)
-  const gx = gridX()
-  const gy = gridY()
-  // the cell's centre in node units (rows from the top), clamped to the outer nodes
-  const nu = clamp(((q.cell.x + 0.5) / 48) * gx - 0.5, 0, gx - 1)
-  const nv = clamp((1 - (q.cell.y + 0.5) / 28) * gy - 0.5, 0, gy - 1)
-  const i0 = min(gx - 2, floor(nu))
-  const j0 = min(gy - 2, floor(nv))
-  const fu = nu - i0
-  const fv = nv - j0
-  const a = MN.at(vec2(i0, j0))
-  const b = MN.at(vec2(i0 + 1, j0))
-  const c = MN.at(vec2(i0, j0 + 1))
-  const e = MN.at(vec2(i0 + 1, j0 + 1))
-  const dx = (a.x * (1 - fu) + b.x * fu) * (1 - fv) + (c.x * (1 - fu) + e.x * fu) * fv
-  const dy = (a.y * (1 - fu) + b.y * fu) * (1 - fv) + (c.y * (1 - fu) + e.y * fu) * fv
-  return vec4(dx / max(signed(at(6)), 1), dy / max(signed(at(7)), 1), 0, 1)
+
+// --- layers: the parts' outline, rasterised once while the picture decodes ------------------------------------------
+// LM texel (i, j) (j from the bottom) stands for the 8 x 8 picture pixels around (8i + 4, 8 (94 - j) + 4) (y from the
+// top). At stage s (1..203) it adds the edges between vertices 4 (s - 1) .. 4 s (at most 812 vertices), which ctl
+// decoded last frame (x 8..12 of row 15): x the parity of the edges crossing the ray to the right of the texel's centre (1 = inside), y the squared
+// distance to the nearest edge point so far, z w that point.
+const LEDGES = 4
+const LMW = 160
+const LMH = 95
+const LMS = 1280 / LMW
+const LDW = 160
+const LDH = 95
+const polyFirst = () => wbits(at(1), 12, 4095)
+const polyCount = () => wbits(at(1), 0, 4095)
+/** ctl (8 + t, 15): vertex 4b + t of the outline, b the batch LM adds next frame (this frame's stage, as ctl reads it
+ * before writing it): x, y (picture pixels, y from the top), z 1 if no edge leaves it, w 1 if it exists */
+function vertexNow(t: number): vec4 {
+  const v = stageNow() * LEDGES + t
+  const nv = polyCount()
+  if (!layered() || v > nv - 0.5) return vec4(0, 0, 1, 0)
+  const w = mword(polyFirst() + v)
+  return vec4(wbits(w, 0, 2047), wbits(w, 11, 1023), v > nv - 1.5 ? 1 : wbits(w, 21, 1), 1)
+}
+const LM: Buffer = buffer({ size: [LMW, LMH], float: 32, filter: 'nearest' }, q => {
+  const old = LM.at(q.cell)
+  const st = stageNow()
+  if (st < 0.5 || head0().x < 0.5) return vec4(0, BIG, 0, 0)
+  if (done()) return old
+  const cx = (q.cell.x + 0.5) * LMS
+  const cy = (LMH - 0.5 - q.cell.y) * LMS
+  let cross = 0
+  let bd = old.y
+  let bx = old.z
+  let by = old.w
+  let v0 = ctl.at(vec2(8, 15))
+  for (const t of range(LEDGES)) {
+    const v1 = ctl.at(vec2(9 + t, 15))
+    const on = v0.z < 0.5 && v1.w > 0.5
+    const ax = v0.x
+    const ay = v0.y
+    const ex = v1.x - ax
+    const ey = v1.y - ay
+    // the ray to the right of the centre crosses the edge when exactly one end lies below the centre (y > cy; a tie
+    // counts as above, so a vertex on the ray is counted once)
+    const spans = (ay > cy ? 1 : 0) + (v1.y > cy ? 1 : 0)
+    const xi = ax + ((cy - ay) * ex) / (abs(ey) > 0.5 ? ey : 1)
+    cross = cross + (on && spans > 0.5 && spans < 1.5 && cx < xi ? 1 : 0)
+    const u = clamp(((cx - ax) * ex + (cy - ay) * ey) / max(ex * ex + ey * ey, 0.000001), 0, 1)
+    const px = ax + u * ex
+    const py = ay + u * ey
+    const d2 = (cx - px) * (cx - px) + (cy - py) * (cy - py)
+    const nearer = on && d2 < bd
+    bd = nearer ? d2 : bd
+    bx = nearer ? px : bx
+    by = nearer ? py : by
+    v0 = v1
+  }
+  return vec4(mod(old.x + cross, 2), bd, bx, by)
+})
+/** signed distance (pixels, > 0 inside the parts) at picture pixel (x, y from the top), from the nearest LM texel and
+ * its nearest edge point: s(c) + g . (p - c), exact for a straight edge */
+function partDist(x: number, y: number): number {
+  const i = clamp(floor(x / LMS), 0, LMW - 1)
+  const r = clamp(floor(y / LMS), 0, LMH - 1)
+  const s = LM.at(vec2(i, LMH - 1 - r))
+  const cx = (i + 0.5) * LMS
+  const cy = (r + 0.5) * LMS
+  const sg = s.x > 0.5 ? 1 : -1
+  const gx = (cx - s.z) * sg
+  const gy = (cy - s.w) * sg
+  const L = sqrt(gx * gx + gy * gy)
+  return sg * sqrt(s.y) + (L > 0.001 ? (gx * (x - cx) + gy * (y - cy)) / L : 0)
+}
+// LD: what the picture pass samples (linearly) at picture point p. Until the picture is done, the loading preview (as
+// MN holds it; lane w -2 once it has arrived, else -1). Then the displacement as a fraction of the picture (x, y down).
+// Layered, with sn the parts' distance at p - Dparts and so at p (where they were; the background moves little):
+//   sn > -rim          the parts' motion (a part carries its antialiased rim along)
+//   otherwise          a blend w of the parts' motion over the background's, the larger of
+//     (so + rim + band) / ((so + rim + band) + (-rim - sn))   what a part uncovers: the strip of real background just
+//                      outside its old rim, stretched over the gap (never its rim, never a copy with a seam)
+//     1 + (sn + rim) / lead   in front of a moving part: the background squeezed smoothly
+//   (0 where both are negative: the background's motion)
+// The field is continuous, so LD's 8-pixel texels and linear filtering blur nothing into copies; frame 0 (both
+// motions 0) is the keyframe exactly. Research and pictures: notes/live-converter/layers/play.mjs.
+const LD: Buffer = buffer({ size: [LDW, LDH], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
+  const u = (q.cell.x + 0.5) / LDW
+  const vb = (q.cell.y + 0.5) / LDH
+  if (!done()) return MN.sample(vec2((clamp(u * 48 - 0.5, 0, 47) + 0.5) / 48, (clamp(vb * 28 - 0.5, 0, 27) + 0.5) / 56))
+  const h0 = head0()
+  const h1 = head1()
+  // the point in node units (rows from the top), clamped to the outer nodes; MN filters between them
+  const nu = (clamp(u * h0.y - 0.5, 0, h0.y - 1) + 0.5) / 48
+  const nv = clamp((1 - vb) * h0.z - 0.5, 0, h0.z - 1) + 0.5
+  const b = MN.sample(vec2(nu, nv / 56))
+  // the light on its 24 x 14 nodes (0 without one: the corner then holds nothing, or layered 48 x 28's parts)
+  const lit = lightHead().x > 0.5
+  const lt = lit ? MN.sample(vec2((clamp(u * 24 - 0.5, 0, 23) + 24.5) / 48, (clamp((1 - vb) * 14 - 0.5, 0, 13) + 42.5) / 56)).x : 0
+  let dx = b.x * h1.x
+  let dy = b.y * h1.y
+  if (h0.x > 0.5) {
+    const f = MN.sample(vec2(nu, (nv + 28) / 56))
+    const fx = f.x * h1.x
+    const fy = f.y * h1.y
+    const X = u * 1280
+    const Y = (1 - vb) * 760
+    const lead = h0.w
+    const sn = partDist(X - fx, Y - fy)
+    const a = partDist(X, Y) + h1.z + h1.w
+    const w = sn > -h1.z ? 1 : max(a > 0 ? a / max(a - h1.z - sn, 0.001) : 0, max(0, 1 + (sn + h1.z) / max(lead, 0.001)))
+    dx = dx + w * (fx - dx)
+    dy = dy + w * (fy - dy)
+  }
+  return vec4(dx / 1280, dy / 760, lt, 1)
 })
 
 export default shader({
   fps: 30,
-  passes: [acc, ctl, Q, D, P, HC, EDG, CD, CF, TH, W, dbH, dbV, pic, MC, MN, sway, picture(q => {
+  passes: [acc, ctl, Q, D, P, HC, EDG, CD, CF, TH, W, dbH, dbV, pic, MN, LM, LD, picture(q => {
     const pa = signed(at(5)) / 1000000
     const a = pa > 0.1 ? pa : 1.684
     const aspect = size.x / size.y
     const fx = min(1, aspect / a)
     const fy = min(1, a / aspect)
     const p = vec2(0.5 + (q.uv.x - 0.5) * fx, 0.5 + (q.uv.y - 0.5) * fy)
-    const d = sway.sample(p)
-    // sway holds the motion (w 1) only once the picture is done; before that, the preview (w < 0)
+    const d = LD.sample(p)
+    // LD holds the motion (w 1) only once the picture is done; before that, the preview (w < 0)
     const dx = d.w > 0 ? d.x : 0
     const dy = d.w > 0 ? d.y : 0
+    const lt = d.w > 0 ? d.z : 0
     const c = pic.sample(vec2(p.x - dx, (CH - PH) / CH + ((p.y + dy) * PH) / CH))
     const flat = scene.sample(vec2(0.99, 0.02))
     let img = vec3(flat.x, flat.y, flat.z)
-    if (c.a > 0.5) img = vec3(c.x, c.y, c.z)
+    if (c.a > 0.5) img = vec3(c.x + lt, c.y + lt, c.z + lt)
     else if (d.w < -1.5) img = vec3(d.x, d.y, d.z)
     if (v.debug < 0.5 || q.uv.y < 0.9) return vec4(img.x, img.y, img.z, 1)
     // debug strip: words seen (green, top), then the stage (yellow while decoding, white after, growing)

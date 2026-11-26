@@ -10,12 +10,16 @@
 // Options (remembered in <dir>/pipeline.json; changing one reruns the stages that use it and everything after):
 //   --name "<Theme name>"   --loop <seconds>|auto|whole   --max <seconds to read, 40>   --motion-words <n, 1008>
 //   --motion-v1 on|off      --quick on|off (encode fast with a fixed quantiser, for checking; off for the real thing)
+//   --layers auto|off|mask  (auto: find parts that move over what is behind them; mask: use work/layers/mask.png as
+//                            painted by hand)
+//   --light auto|off        (auto: add a brightness term for light the motion cannot draw, when it pays for its words)
 //
-// Stages: probe -> keyframe -> frames -> loop -> motion -> encode -> theme   (then install, only when asked)
+// Stages: probe -> keyframe -> frames -> loop -> motion -> layers -> light -> encode -> theme   (then install, only
+// when asked)
 // Each writes its files under <dir>/work, its log to <dir>/logs/<stage>.log, and a section of <dir>/REPORT.md with
 // pictures in <dir>/report/ to check by eye. A still picture skips frames, loop and motion (it gets no motion).
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, statSync, createWriteStream } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, statSync, createWriteStream, unlinkSync } from 'node:fs'
 import { join, resolve, dirname, extname, basename, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -23,8 +27,8 @@ import { homedir } from 'node:os'
 import { writePNG } from './png.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const STAGES = ['probe', 'keyframe', 'frames', 'loop', 'motion', 'encode', 'theme']
-const DEFAULTS = { name: null, loop: 'auto', max: 40, 'motion-words': 1008, 'motion-v1': 'off', quick: 'off' }
+const STAGES = ['probe', 'keyframe', 'frames', 'loop', 'motion', 'layers', 'light', 'encode', 'theme']
+const DEFAULTS = { name: null, loop: 'auto', max: 40, 'motion-words': 1008, 'motion-v1': 'off', layers: 'auto', light: 'auto', quick: 'off' }
 const MW = 320, MH = 190, FPS = 12, S = MW * MH
 const CROP = "crop='min(iw,ih*800/475)':'min(ih,iw*475/800)'"
 
@@ -76,11 +80,13 @@ const save = (dir, st) => writeFileSync(statePath(dir), JSON.stringify(st, null,
 const hash = v => createHash('sha1').update(JSON.stringify(v)).digest('hex').slice(0, 12)
 
 // What each stage reads: the options it uses and the stages before it. A stage is stale when this changes.
-const USES = { probe: [], keyframe: [], frames: ['max'], loop: ['loop'], motion: ['motion-words', 'motion-v1'], encode: ['quick'], theme: ['name'] }
-const UP = { probe: [], keyframe: ['probe'], frames: ['probe'], loop: ['frames'], motion: ['loop'], encode: ['keyframe', 'motion'], theme: ['encode'] }
+const USES = { probe: [], keyframe: [], frames: ['max'], loop: ['loop'], motion: ['motion-words', 'motion-v1'], layers: ['layers', 'motion-words'], light: ['light'], encode: ['quick'], theme: ['name'] }
+const UP = { probe: [], keyframe: ['probe'], frames: ['probe'], loop: ['frames'], motion: ['loop'], layers: ['keyframe', 'motion'], light: ['motion', 'layers'], encode: ['keyframe', 'motion', 'layers', 'light'], theme: ['encode'] }
 function fingerprint(st, s) {
   const inputStamp = st.input && existsSync(st.input) ? statSync(st.input).mtimeMs + ':' + statSync(st.input).size : 'missing'
-  return hash({ s, v: 1, input: s === 'probe' ? inputStamp : undefined, opts: USES[s].map(k => st.options[k]), up: UP[s].map(u => st.stages[u]?.fp ?? null) })
+  const maskP = join(st.dir, 'work', 'layers', 'mask.png')
+  const maskStamp = s === 'layers' && st.options.layers === 'mask' ? (existsSync(maskP) ? statSync(maskP).mtimeMs + ':' + statSync(maskP).size : 'missing') : undefined
+  return hash({ s, v: 1, input: s === 'probe' ? inputStamp : maskStamp, opts: USES[s].map(k => st.options[k]), up: UP[s].map(u => st.stages[u]?.fp ?? null) })
 }
 
 // --- the stages ----------------------------------------------------------------------------------------------------
@@ -188,10 +194,53 @@ const run = {
     return { summary: [`${((100 * mov) / S).toFixed(1)}% of the picture moves (orange in the map).`, line[0].toUpperCase() + line.slice(1) + '.', `Moving error: the average grey-level error left on moving pixels when the motion is played; with no motion at all it would be ${still.toFixed(2)}. Content that appears rather than moves (a curtain opening, hair crossing) stays as error.`], images: ['motion-map.png'], facts: { moving: mov / S, stillErr: still } }
   },
 
+  async layers(st, { log }) {
+    const out = W(st, 'pack.layers.json'), mode = st.options.layers
+    for (const f of [out, out.replace(/\.json$/, '.play.json')]) if (existsSync(f)) unlinkSync(f)
+    if (isStill(st)) return { summary: ['A still picture: no layers.'], skipped: true, facts: { used: false } }
+    if (mode === 'off' || st.options['motion-v1'] === 'on') return { summary: [mode === 'off' ? 'Layers off, as asked (--layers off): one motion field for the whole picture.' : 'Layers need motion v2 (--motion-v1 off).'], skipped: true, facts: { used: false } }
+    tools()
+    // two fields need more room than one: 1.5 x the motion words (a test wallpaper: moving error 9.2 at 1 x, 7.7 at 1.5 x, against
+    // 7.5 for one field; each 1000 words cost the keyframe ~0.45 dB); the outline comes on top
+    const args = [join(st.dir, 'work'), out, '--budget', String(Math.round(1.5 * st.options['motion-words'])), '--video', st.input, '--ffmpeg', FF]
+    if (mode === 'mask') {
+      const m = W(st, 'layers/mask.png')
+      if (!existsSync(m)) throw new Problem('--layers mask uses work/layers/mask.png, and there is none yet.', 'Run with --layers auto first: it makes that file for you to correct.')
+      args.push('--mask', m)
+    }
+    console.log(`  finding the parts that move on their own${mode === 'mask' ? ' (your mask)' : ': a few minutes'}...`)
+    const text = await nodeScript(log, 'layers.mjs', args, { stage: 'layers' })
+    const used = existsSync(out), say = text.split(/\r?\n/).filter(l => /^(part \d|dropped|no part|outline:|layered motion:|the two fields|.* has no parts)/.test(l))
+    const images = []
+    for (const [from, to] of [['overlay.png', 'layers.png'], ['compare.png', 'layers-compare.png']]) if (used && existsSync(W(st, 'layers/' + from))) { copyFileSync(W(st, 'layers/' + from), R(st, to)); images.push(to) }
+    const summary = used
+      ? [...say, "layers.png: each part tinted, its outline white; the rest of the picture keeps the background's motion. layers-compare.png: the frame where the parts move most, real | one field | layered (what is beside a part should stay straight in the third).", "To correct an outline: paint over work/layers/mask.png (black = background, a part's colour = that part; keep it 1280 x 760), then run with --layers mask."]
+      : ['No layers: the one-field motion from the motion stage is used.', ...say.filter(l => !/^no layers/.test(l))]
+    return { summary, images, facts: { used } }
+  },
+
+  async light(st, { log }) {
+    const out = W(st, 'pack.light.json')
+    for (const f of [out, out.replace(/.json$/, '.light-play.json')]) if (existsSync(f)) unlinkSync(f)
+    if (isStill(st)) return { summary: ['A still picture: no light.'], skipped: true, facts: { used: false } }
+    if (st.options.light === 'off') return { summary: ['Light off, as asked (--light off).'], skipped: true, facts: { used: false } }
+    if (st.options['motion-v1'] === 'on') return { summary: ['The light term needs motion v2 (--motion-v1 off).'], skipped: true, facts: { used: false } }
+    if (st.stages.layers?.facts?.used) return { summary: ['Layers are on: the light term works with one motion field only, so it is left out (--layers off to have it instead).'], skipped: true, facts: { used: false } }
+    tools()
+    const { P } = st.stages.loop.facts
+    const text = await nodeScript(log, 'light.mjs', [W(st, 'pack.json'), W(st, 'loop.gray'), String(MW), String(MH), out, '400', R(st, 'light.png')], { stage: 'light' })
+    const used = / kept$/m.test(text), line = (text.match(/^light: .*$/m) ?? ['light fitted'])[0]
+    return {
+      summary: [line[0].toUpperCase() + line.slice(1) + '.', 'light.png: the middle of the loop, real | motion only | motion and light. The light is a brightness change on a coarse grid (sweeping light, glare, shadows), for what a warp of the keyframe cannot draw.'],
+      images: existsSync(R(st, 'light.png')) ? ['light.png'] : [], facts: { used, frames: P },
+    }
+  },
+
   async encode(st, { log }) {
     const svgP = join(st.dir, 'live', `${st.id}-key.svg`), pngP = join(st.dir, 'preview.png'), quick = st.options.quick === 'on'
-    console.log(`  encoding the keyframe${quick ? ' (quick)' : ': about 13 minutes'}...`)
-    const out = await nodeScript(log, 'ka2-enc.mjs', [W(st, 'ref.rgb'), '1920', '1140', W(st, 'pack.json'), svgP, pngP], { stage: 'encode', env: { CAP: '255', QTAB: join(here, 'q20-14.json'), ...(quick ? { FIXS: '1.8' } : {}) } })
+    console.log(`  encoding the keyframe${quick ? ' (quick)' : ': a few minutes (longer on a machine with few cores)'}...`)
+    const pack = st.stages.light?.facts?.used ? W(st, 'pack.light.json') : st.stages.layers?.facts?.used ? W(st, 'pack.layers.json') : W(st, 'pack.json')
+    const out = await nodeScript(log, 'ka2-enc.mjs', [W(st, 'ref.rgb'), '1920', '1140', pack, svgP, pngP], { stage: 'encode', env: { CAP: '255', QTAB: join(here, 'q20-14.json'), ...(quick ? { FIXS: '1.8' } : {}) } })
     const m = out.match(/decode mismatches (\d+), PSNR ([\d.]+) dB/)
     if (!m) throw new Problem('The encoder finished without its final check line.', 'See logs/encode.log.')
     if (+m[1] !== 0) throw new Problem(`The encoded keyframe does not decode exactly (${m[1]} mismatches): the file would draw wrongly.`, 'This is a codec bug, not something an option fixes. Keep logs/encode.log and work/ for whoever looks at it.')
@@ -246,7 +295,7 @@ come back: Claude Desktop pauses wallpapers for a while after an unclean stop, a
 }
 
 // --- report ------------------------------------------------------------------------------------------------------
-const TITLES = { probe: 'Probe: what the file is', keyframe: 'Keyframe: the picture', frames: 'Frames: motion samples', loop: 'Loop: how long one cycle is', motion: 'Motion: what moves and how', encode: 'Encode: the keyframe codec', theme: 'Theme: colours and files', install: 'Install' }
+const TITLES = { probe: 'Probe: what the file is', keyframe: 'Keyframe: the picture', frames: 'Frames: motion samples', loop: 'Loop: how long one cycle is', motion: 'Motion: what moves and how', layers: 'Layers: parts that move on their own', light: 'Light: brightness changes', encode: 'Encode: the keyframe codec', theme: 'Theme: colours and files', install: 'Install' }
 function writeReport(st) {
   const L = [`# ${st.options.name ?? st.id}: conversion report`, '', `Wallpaper: \`${st.input}\`  `, `Options: ${Object.entries(st.options).map(([k, v]) => `${k} ${v ?? '(default)'}`).join(', ')}`, '']
   for (const s of [...STAGES, 'install']) {
@@ -262,7 +311,7 @@ function status(st, why) {
   const lines = []
   for (const s of STAGES) {
     const r = st.stages[s], stale = r && r.status === 'done' && r.fp !== fingerprint(st, s)
-    const mark = !r ? 'not run' : r.status === 'failed' ? 'FAILED' : stale ? 'needs rerun (its inputs changed)' : r.skipped ? 'skipped (still picture)' : 'done'
+    const mark = !r ? 'not run' : r.status === 'failed' ? 'FAILED' : stale ? 'needs rerun (its inputs changed)' : r.skipped ? 'skipped' : 'done'
     lines.push(`  ${s.padEnd(9)} ${mark}${r?.status === 'done' && !stale && r.summary?.[0] ? ': ' + r.summary[0] : ''}${r?.status === 'failed' ? ': ' + r.error : ''}`)
   }
   if (st.stages.install) lines.push(`  ${'install'.padEnd(9)} ${st.stages.install.status}: ${st.stages.install.summary?.[0] ?? st.stages.install.error ?? ''}`)
@@ -357,6 +406,8 @@ function setOptions(st) {
     if (k === 'loop' && !/^(auto|whole|\d+(\.\d+)?)$/.test(v)) throw new Problem(`--loop ${v} is not a loop length.`, 'Give seconds (e.g. 8 or 7.5), auto, or whole.')
     if ((k === 'max' || k === 'motion-words') && !(+v > 0)) throw new Problem(`--${k} needs a positive number.`, '')
     if ((k === 'quick' || k === 'motion-v1') && !['on', 'off'].includes(v)) throw new Problem(`--${k} is on or off.`, '')
+    if (k === 'layers' && !['auto', 'off', 'mask'].includes(v)) throw new Problem(`--layers is auto, off or mask.`, '')
+    if (k === 'light' && !['auto', 'off'].includes(v)) throw new Problem(`--light is auto or off.`, '')
     st.options[k] = k === 'max' || k === 'motion-words' ? +v : v
   }
 }

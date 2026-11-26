@@ -32,11 +32,14 @@ export function stdMap(gray, W, H) {
   return Float32Array.from(mu, (m, i) => Math.sqrt(Math.max(0, q[i] / F - (m / F) ** 2)))
 }
 
-/** fit and quantise one layout; returns { pack, play, words } */
-export function fit(m, std, W, H, loopMs, K, T, WB, CB) {
+/** fit and quantise one layout; returns { pack, play, words }. keepIn: which nodes move (default: those near a pixel
+ * whose temporal std is over 4; layers.mjs passes its own for its two grids). dims 2: x and y (motion); 1: x only (the
+ * light term: tracks hold [light, 0], one weight set a node) */
+export function fit(m, std, W, H, loopMs, K, T, WB, CB, keepIn, dims = 2) {
+  const DIM = dims === 1 ? [0] : [0, 1]
   const { GX, GY, N } = m, G = GX * GY
-  const keep = new Uint8Array(G)
-  for (let i = 0; i < W * H; i++) {
+  const keep = keepIn ? Uint8Array.from(keepIn) : new Uint8Array(G)
+  for (let i = 0; i < W * H && !keepIn; i++) {
     if (std[i] <= 4) continue
     const x = i % W, y = Math.floor(i / W), u = ((x + 0.5) / W) * GX - 0.5, v = ((y + 0.5) / H) * GY - 0.5
     for (const a of [Math.floor(u), Math.floor(u) + 1]) for (const b of [Math.floor(v), Math.floor(v) + 1])
@@ -45,7 +48,7 @@ export function fit(m, std, W, H, loopMs, K, T, WB, CB) {
   const movers = [...keep.keys()].filter(n => keep[n])
   // principal curves of the moving nodes' tracks
   const C = Array.from({ length: N }, () => new Float64Array(N))
-  for (const n of movers) for (const c of [0, 1]) {
+  for (const n of movers) for (const c of DIM) {
     const r = m.tracks[n].d.map(d => d[c])
     for (let a = 0; a < N; a++) if (r[a]) for (let b = 0; b < N; b++) C[a][b] += r[a] * r[b]
   }
@@ -83,13 +86,13 @@ export function fit(m, std, W, H, loopMs, K, T, WB, CB) {
     }
     return M.map((r, i) => (r[i] ? r[n] / r[i] : 0))
   }
-  const Wt = movers.map(n => [0, 1].map(c => solve(curves.map(u => u.reduce((s, v, f) => s + v * m.tracks[n].d[f][c], 0)))))
-  const scaleQ = Array.from({ length: K }, (_, k) => Math.max(1, Math.round(4096 * Math.max(...Wt.flatMap(w => [Math.abs(w[0][k]), Math.abs(w[1][k])])))))
+  const Wt = movers.map(n => DIM.map(c => solve(curves.map(u => u.reduce((s, v, f) => s + v * m.tracks[n].d[f][c], 0)))))
+  const scaleQ = Array.from({ length: K }, (_, k) => Math.max(1, Math.round(4096 * Math.max(...Wt.flatMap(w => w.map(row => Math.abs(row[k])))))))
   const wq = Wt.map(w => w.map(row => row.map((v, k) => Math.max(-WL, Math.min(WL, Math.round((v / (scaleQ[k] / 4096)) * WL))))))
   // played tracks
   const deq = (q, k) => (q / WL) * (scaleQ[k] / 4096)
   const play = { ...m, tracks: m.tracks.map(() => ({ d: Array.from({ length: N }, () => [0, 0]) })) }
-  movers.forEach((n, r) => { for (let f = 0; f < N; f++) for (const c of [0, 1]) play.tracks[n].d[f][c] = curves.reduce((s, u, k) => s + deq(wq[r][c][k], k) * u[f], 0) })
+  movers.forEach((n, r) => { for (let f = 0; f < N; f++) for (const c of DIM) play.tracks[n].d[f][c] = curves.reduce((s, u, k) => s + deq(wq[r][c][k], k) * u[f], 0) })
   // the block of words
   const bits = []
   const put = (v, b) => { for (let i = b - 1; i >= 0; i--) bits.push((v >> i) & 1) }

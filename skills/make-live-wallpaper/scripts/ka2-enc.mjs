@@ -6,7 +6,7 @@
 //   env QTAB=<[luma64, chroma64] json> quantisers; FIXS=<s> skip the s search (quick runs); REF=<file> write the
 //   decoder's planes and pictures for the shader simulator; WORDS=<file> write the words as json.
 // Words (16 x 8 SMIL cells, 110 moments, 24 bits each):
-//   0..15      header: 0 'PRL', 1-3 motion scales * 65536, 4 loop ms, 5 picture aspect * 1e6, 6-7 motion frame W/H,
+//   0..15      header: 0 'PRL', 1-3 motion scales * 65536 (v1; with MV2: 1-2 the layers, 3 the light), 4 loop ms, 5 picture aspect * 1e6, 6-7 motion frame W/H,
 //              8 'KA2' (0x4B4132), 9 quantiser scale s * 4096 (a whole number), 10 the stream's first word,
 //              11 'THB' when the loading preview (thumb.mjs: words 1152..1211) is present
 //   16..1023   motion (as live.ts), or with motion v2 (mv2.mjs: 12 'MV2', 13 layout, 14 block words MW, 15 moving
@@ -34,9 +34,14 @@
 // Angles: a = 3.75 n degrees; T64[n] = round(64 tan(3.75 n)), n 0..23, gives every 64 cot and 64 tan used.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
+import { availableParallelism } from 'node:os'
 import { thumbWords } from './thumb.mjs'
 
-const [, , refPath, rws, rhs, packPath, outPath, previewPath, stepArg = '50', gapArg = '20'] = process.argv
+// Parallel: the search's trial encodes are split by tile row (64 luma rows with the chroma under them: prediction,
+// contexts and chroma-from-luma never cross one) over worker threads running this same file. Bit for bit the same
+// as one thread. env WORKERS=<n> (default: up to 12, by the machine's threads), WORKERS=1 = one thread.
+const [, , refPath, rws, rhs, packPath, outPath, previewPath, stepArg = '50', gapArg = '20'] = isMainThread ? process.argv : workerData.argv
 const RW = +rws, RH = +rhs
 const ref = readFileSync(refPath)
 const pack = JSON.parse(readFileSync(packPath, 'utf8'))
@@ -60,7 +65,9 @@ function cflAC(bx, by) {
   let e = 0; for (let i = 0; i < 64; i++) { CFL_AC[i] -= m; e += CFL_AC[i] ** 2 }
   return e
 }
-const SWORDS = WORDS - (V2 ? Math.max(0, pack.words.length - 1008) : 0) // the stream ends here
+// the motion block, then the light's when there is one (light.mjs)
+const BLOCK = V2 ? (pack.light ? [...pack.words, ...pack.light.words] : pack.words) : []
+const SWORDS = WORDS - Math.max(0, BLOCK.length - 1008) // the stream ends here
 const RDO_L = +(process.env.RDO_L ?? 0.15), WEIGHT = [1, 8 / 3, 4]
 // 16x16 luma superblocks (80 x 48; a tile is 20 x 4 of them). PART=0: always four 8x8 in z-order, no partition letter
 const PART = process.env.PART !== '0'
@@ -532,12 +539,13 @@ function code8(rec, modes, st, lam, bx, by, prevN, noTR) {
 }
 const SUBS = [[0, 0, false], [1, 0, false], [0, 1, false], [1, 1, true]] // z-order; the last has no above-right
 /** luma by superblock: one 16x16 or four 8x8, by RD */
-function codeLuma(s) {
-  const w = CW, rec = new Int32Array(w * CH), modes = new Int8Array(160 * 96), sbs = []
+/** tile rows ty0..ty1-1 (4 superblock rows each); bl = each superblock's bits, in order */
+function codeLuma(s, ty0 = 0, ty1 = 12) {
+  const w = CW, rec = new Int32Array(w * CH), modes = new Int8Array(160 * 96), sbs = [], bl = []
   const st = ZZ.map(z => TL[z] * s), Q16 = q16of(TL), st16 = ZZ16.map(z => Q16[z] * s), lam0 = RDO_L * (16 * s) ** 2
   const keep = new Int32Array(256)
   let bits = 0, prevN = 0, n16 = 0
-  for (let sy = 0; sy < 48; sy++) for (let sx = 0; sx < 80; sx++) {
+  for (let sy = ty0 * 4; sy < ty1 * 4; sy++) for (let sx = 0; sx < 80; sx++) {
     if (sx === 0) prevN = 0
     const lam = lam0 / roiWeight((sx + 0.5) * 16, (sy + 0.5) * 16)
     const pctx = cPart(sx % 20 > 0 ? sbs[sbs.length - 1].part : 0)
@@ -569,12 +577,12 @@ function codeLuma(s) {
     if (J16 < d8 + lam * b8) {
       for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) rec[(sy * 16 + y) * w + sx * 16 + x] = keep[y * 16 + x]
       for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) modes[(2 * sy + j) * 160 + 2 * sx + i] = b16.b.mode
-      sbs.push({ part: 0, b: b16.b }); bits += b16.bits; prevN = b16.n; n16++
+      sbs.push({ part: 0, b: b16.b }); bits += b16.bits; bl.push(b16.bits); prevN = b16.n; n16++
     } else {
-      sbs.push({ part: 1, subs }); bits += b8; prevN = pn
+      sbs.push({ part: 1, subs }); bits += b8; bl.push(b8); prevN = pn
     }
   }
-  return { bits, rec, sbs, n16 }
+  return { bits, bl, rec, sbs, n16 }
 }
 const PARTC = process.env.PARTC !== '0'
 /** one chroma 8x8 pair (Co, Cg share the mode) at (bx, by), mode search as codeGroup; writes recs and modes */
@@ -626,14 +634,14 @@ function codeC8(recs, modes, st, lam, bx, by, prevN, noTR) {
   return { blocks, bits, dW, ns }
 }
 /** chroma by superblock (40 x 24, tile 10 x 2): one 16x16 pair or four 8x8 pairs, by RD */
-function codeChroma(s) {
+function codeChroma(s, ty0 = 0, ty1 = 12) {
   CUR_D = 0
-  const w = 640, recs = [new Int32Array(w * 384), new Int32Array(w * 384)], modes = new Int8Array(80 * 48), sbs = [], group = [CoH, CgH]
+  const w = 640, recs = [new Int32Array(w * 384), new Int32Array(w * 384)], modes = new Int8Array(80 * 48), sbs = [], bl = [], group = [CoH, CgH]
   const st = ZZ.map(z => TC[z] * s), Q16 = q16of(TC), st16 = ZZ16.map(z => Q16[z] * s), lam0 = RDO_L * (16 * s) ** 2
   const keep = [new Int32Array(256), new Int32Array(256)]
   let bits = 0, n16 = 0
   const prevN = [0, 0]
-  for (let sy = 0; sy < 24; sy++) for (let sx = 0; sx < 40; sx++) {
+  for (let sy = ty0 * 2; sy < ty1 * 2; sy++) for (let sx = 0; sx < 40; sx++) {
     if (sx === 0) prevN.fill(0)
     const lam = lam0 / roiWeight((sx + 0.5) * 32, (sy + 0.5) * 32)
     const pctx = cPart(sx % 10 > 0 ? sbs[sbs.length - 1].part : 0) + OC
@@ -692,24 +700,61 @@ function codeChroma(s) {
     if (J16 < d8 + lam * b8) {
       for (let g = 0; g < 2; g++) for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) recs[g][(sy * 16 + y) * w + sx * 16 + x] = keep[g][y * 16 + x]
       for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) modes[(2 * sy + j) * 80 + 2 * sx + i] = r16.blocks[0].mode
-      sbs.push({ part: 0, b16: r16.blocks }); bits += r16.bits; prevN[0] = r16.ns[0]; prevN[1] = r16.ns[1]; n16++
+      sbs.push({ part: 0, b16: r16.blocks }); bits += r16.bits; bl.push(r16.bits); prevN[0] = r16.ns[0]; prevN[1] = r16.ns[1]; n16++
     } else {
-      sbs.push({ part: 1, subs }); bits += b8; prevN[0] = pn[0]; prevN[1] = pn[1]
+      sbs.push({ part: 1, subs }); bits += b8; bl.push(b8); prevN[0] = pn[0]; prevN[1] = pn[1]
     }
   }
-  return { bits, recs, sbs, n16 }
+  return { bits, bl, recs, sbs, n16 }
 }
 function modeStats(enc) {
   const n = new Array(9).fill(0)
   enc.c.sbs.forEach(sb => { if (sb.part === 0) n[sb.b16[0].mode] += 4; else sb.subs.forEach(pr => n[pr[0].mode]++) })
   return n.join(' ')
 }
-function encode(s) {
+function encodeRows(s, ty0, ty1) {
   S4096 = Math.round(s * 4096)
   s = S4096 / 4096
-  const y = codeLuma(s)
+  const y = codeLuma(s, ty0, ty1)
   LUMA = y.rec
-  const c = codeChroma(s)
+  const c = codeChroma(s, ty0, ty1)
+  return { y, c }
+}
+// --- worker threads -----------------------------------------------------------------------------------------------------
+if (!isMainThread) {
+  parentPort.on('message', ({ s, cost, ty0, ty1 }) => {
+    COST.set(cost)
+    const { y, c } = encodeRows(s, ty0, ty1)
+    const rows = (a, w, r0, r1) => a.slice(r0 * w, r1 * w)
+    parentPort.postMessage({
+      y: { bl: y.bl, sbs: y.sbs, n16: y.n16, rec: rows(y.rec, 1280, ty0 * 64, ty1 * 64) },
+      c: { bl: c.bl, sbs: c.sbs, n16: c.n16, recs: c.recs.map(r => rows(r, 640, ty0 * 32, ty1 * 32)) },
+    })
+  })
+  await new Promise(() => {}) // serve until the main thread ends us
+}
+const NW = Math.max(1, Math.min(12, +(process.env.WORKERS ?? availableParallelism() - 1)))
+const RANGES = Array.from({ length: NW }, (_, i) => [Math.round((i * 12) / NW), Math.round(((i + 1) * 12) / NW)])
+const pool = NW > 1 ? RANGES.map(() => new Worker(new URL(import.meta.url), { workerData: { argv: process.argv } })) : []
+const ask = (wk, msg) => new Promise((ok, no) => {
+  const done = m => { wk.off('error', no); ok(m) }
+  wk.once('message', done); wk.once('error', no)
+  wk.postMessage(msg)
+})
+async function encode(s) {
+  if (!pool.length) { const { y, c } = encodeRows(s, 0, 12); return { bits: y.bits + c.bits, y, c } }
+  const parts = await Promise.all(pool.map((wk, i) => ask(wk, { s, cost: COST, ty0: RANGES[i][0], ty1: RANGES[i][1] })))
+  S4096 = Math.round(s * 4096)
+  // stitch, adding the bits in the one-thread order so the sums match to the last bit
+  const y = { bits: 0, rec: new Int32Array(CW * CH), sbs: [], n16: 0 }
+  const c = { bits: 0, recs: [new Int32Array(640 * 384), new Int32Array(640 * 384)], sbs: [], n16: 0 }
+  parts.forEach((p, i) => {
+    for (const b of p.y.bl) y.bits += b
+    y.rec.set(p.y.rec, RANGES[i][0] * 64 * 1280); y.sbs.push(...p.y.sbs); y.n16 += p.y.n16
+    for (const b of p.c.bl) c.bits += b
+    p.c.recs.forEach((r, g) => c.recs[g].set(r, RANGES[i][0] * 32 * 640)); c.sbs.push(...p.c.sbs); c.n16 += p.c.n16
+  })
+  LUMA = y.rec
   return { bits: y.bits + c.bits, y, c }
 }
 
@@ -739,15 +784,15 @@ let tab, s = 1.8, enc
 const tableWords = t => Math.ceil(t.bytes.length / 3)
 if (process.env.FIXS) {
   s = Math.round(+process.env.FIXS * 4096) / 4096
-  for (let r = 0; r < 2; r++) { enc = encode(s); tab = buildTables(enc) }
+  for (let r = 0; r < 2; r++) { enc = await encode(s); tab = buildTables(enc) }
   console.log(`fixed s ${s.toFixed(4)}, model bits ${enc.bits.toFixed(0)}, tables ${tab.bytes.length} bytes`)
 } else for (let round = 0; round < 4; round++) {
   const avail = (SWORDS - CB0 - (tab ? tableWords(tab) : 700)) * 24 - (round < 3 ? 1200 : 150)
   let lo = round ? s / 1.25 : 0.3, hi = round ? s * 1.25 : 20, best
-  for (let it = 0; it < (round ? 9 : 13); it++) { const t = Math.sqrt(lo * hi), e = encode(t); if (e.bits > avail) lo = t; else { hi = t; best = t } }
+  for (let it = 0; it < (round ? 9 : 13); it++) { const t = Math.sqrt(lo * hi), e = await encode(t); if (e.bits > avail) lo = t; else { hi = t; best = t } }
   if (!best) throw new Error('cannot fit')
   s = Math.ceil(best * 4096) / 4096
-  enc = encode(s); tab = buildTables(enc)
+  enc = await encode(s); tab = buildTables(enc)
   console.log(`round ${round}: s ${s.toFixed(4)}, model bits ${enc.bits.toFixed(0)} of ${avail}, tables ${tab.bytes.length} bytes`)
 }
 // the real stream, with the tables built from its own letters; nudge s up if it overflows
@@ -761,8 +806,9 @@ for (;;) {
   SS = CB0 + tableWords(tab); STREAM_BITS = (SWORDS - SS) * 24
   if (bitsOut.length <= STREAM_BITS - 48) break
   console.log(`overflow: ${bitsOut.length} of ${STREAM_BITS}; s up`)
-  s = Math.ceil(s * 1.004 * 4096) / 4096; enc = encode(s); tab = buildTables(enc)
+  s = Math.ceil(s * 1.004 * 4096) / 4096; enc = await encode(s); tab = buildTables(enc)
 }
+for (const wk of pool) wk.terminate() // the search is over
 if (starts.length !== 96) throw new Error(`${starts.length} slices`)
 
 const words = new Array(WORDS).fill(0)
@@ -771,10 +817,18 @@ if (!V2) pack.scale.forEach((v, h) => { words[1 + h] = Math.round(v * 65536) })
 words[4] = pack.loopMs ?? 8000; words[5] = Math.round((CW / PH) * 1e6); words[6] = pack.W; words[7] = pack.H
 words[8] = 0x4b4132; words[9] = Math.round(s * 4096); words[10] = SS
 if (V2) {
-  const MW = pack.words.length
+  const MW = BLOCK.length
   words[12] = 0x4d5632; words[13] = ((pack.GX > 24 ? 1 : 0) << 19) | (pack.K << 15) | (pack.T << 8) | (pack.WB << 4) | pack.CB
   words[14] = MW; words[15] = pack.movers
-  pack.words.forEach((w, i) => { words[i < 1008 ? 16 + i : WORDS - MW + i] = w })
+  // layered (layers.mjs): the outline's vertex words sit in the block from block word `first`; word 2 the rule's widths
+  if (pack.layers) { words[13] |= 1 << 20; words[1] = (pack.layers.first << 12) | pack.layers.count; words[2] = pack.layers.word2 }
+  // light (light.mjs): word 3 = 1 << 23 | K << 20 | WB << 16 | CB << 12 | its first block word (T is 32)
+  if (pack.light) {
+    const l = pack.light
+    if (l.T !== 32 || l.K > 7 || pack.words.length > 4095) throw new Error('light block out of range')
+    words[3] = (1 << 23) | (l.K << 20) | (l.WB << 16) | (l.CB << 12) | pack.words.length
+  }
+  BLOCK.forEach((w, i) => { words[i < 1008 ? 16 + i : WORDS - MW + i] = w })
 } else pack.ints.forEach((row, n) => row.forEach((w, h) => { words[16 + n * 3 + h] = w }))
 starts.forEach((b, i) => { words[1024 + i] = b })
 ;[...TL, ...TC].forEach((v, e) => { words[T0 + Math.floor(e / 3)] |= v << (8 * (2 - (e % 3))) })
@@ -1046,13 +1100,40 @@ function cdefAt(x, y, pri, sec) {
 const withY4 = (out, i, y4) => { const dl = (y4 - Y4[i]) / 4; for (let c = 0; c < 3; c++) out[i * 3 + c] = clamp(Math.round(db[i * 3 + c] + dl), 0, 255) }
 { // the search: each unit's squared error under each of the 64 (pri, sec) pairs, then 8 presets chosen greedily
   const SSE = Array.from({ length: NU }, () => new Float64Array(64))
+  // cdefAt for all 64 pairs at once: the primary and secondary sums are independent integers, so 16 + 4 sums a pixel
+  // give exactly what 64 calls would
+  const sP = new Int32Array(16), pOn = new Uint8Array(16), sS = new Int32Array(4)
   for (let u = 0; u < NU; u++) {
     const x0 = (u % UW) * 64, y0 = Math.floor(u / UW) * 64
-    for (let y = y0; y < Math.min(H, y0 + 64); y++) for (let x = x0; x < x0 + 64; x++) for (let ci = 0; ci < 64; ci++) {
-      const i = y * W + x
-      const dl = (cdefAt(x, y, ci >> 2, SECS[ci & 3]) - Y4[i]) / 4; let e = 0
-      for (let c = 0; c < 3; c++) e += (clamp(Math.round(db[i * 3 + c] + dl), 0, 255) - pic[i * 3 + c]) ** 2
-      SSE[u][ci] += e
+    for (let y = y0; y < Math.min(H, y0 + 64); y++) for (let x = x0; x < x0 + 64; x++) {
+      const i = y * W + x, k = (y >> 3) * BW + (x >> 3), d = DIRS[k], c = Y4[i]
+      const taps = (dir, kk) => [1, -1].map(sg => { const yy = y + sg * CD[dir][kk][0], xx = x + sg * CD[dir][kk][1]; return yy < 0 || yy >= H || xx < 0 || xx >= W ? null : Y4[yy * W + xx] })
+      const P = [taps(d, 0), taps(d, 1)], Sx = [[...taps((d + 2) & 7, 0), ...taps((d + 6) & 7, 0)], [...taps((d + 2) & 7, 1), ...taps((d + 6) & 7, 1)]]
+      let pmx = c, pmn = c, smx = c, smn = c
+      for (const v of P.flat()) if (v !== null) { if (v > pmx) pmx = v; if (v < pmn) pmn = v }
+      for (const v of Sx.flat()) if (v !== null) { if (v > smx) smx = v; if (v < smn) smn = v }
+      for (let pri = 0; pri < 16; pri++) {
+        const ps = adjust(pri, VARS[k]) << 2, pt = (ps >> 2) & 1 ? [3, 3] : [4, 2]
+        let t = 0; if (ps) for (let kk = 0; kk < 2; kk++) for (const v of P[kk]) if (v !== null) t += pt[kk] * constrain(v - c, ps)
+        sP[pri] = t; pOn[pri] = ps ? 1 : 0
+      }
+      for (let si = 0; si < 4; si++) {
+        const ss = SECS[si] << 2
+        let t = 0; if (ss) for (let kk = 0; kk < 2; kk++) for (const v of Sx[kk]) if (v !== null) t += [2, 1][kk] * constrain(v - c, ss)
+        sS[si] = t
+      }
+      for (let ci = 0; ci < 64; ci++) {
+        const pri = ci >> 2, si = ci & 3, po = pOn[pri], so = si > 0
+        let val = c
+        if (po || so) {
+          const sum = sP[pri] + sS[si]
+          const mx = Math.max(po ? pmx : c, so ? smx : c), mn = Math.min(po ? pmn : c, so ? smn : c)
+          val = clamp(c + ((8 + sum - (sum < 0 ? 1 : 0)) >> 4), mn, mx)
+        }
+        const dl = (val - c) / 4; let e = 0
+        for (let ch = 0; ch < 3; ch++) e += (clamp(Math.round(db[i * 3 + ch] + dl), 0, 255) - pic[i * 3 + ch]) ** 2
+        SSE[u][ci] += e
+      }
     }
   }
   const chosen = [], best = new Float64Array(NU).fill(Infinity)

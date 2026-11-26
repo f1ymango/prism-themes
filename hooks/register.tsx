@@ -148,6 +148,9 @@ let liveScene: { scene: string; source: string; id: string; native: boolean; gen
 let native = false
 /** /prism livedebug on|off: the live player (hooks/live.ts) draws what it reads from the data strip on top. */
 let liveDebug = false
+/** /prism motion off|on: a live key wallpaper holds its first frame (the shader's clock stays at 0); saved in $.store.
+ * It does not lower the GPU cost: the Svg's data animation keeps Desktop's player drawing. */
+let motionOff = false
 /**
  * /prism probe <cells across>|off: checks that colours drawn by an Svg reach the shader exactly (hooks/probe.ts), the
  * groundwork for carrying packed data in the Svg. The grid is stretched over the window; a centred patch is coloured.
@@ -642,6 +645,16 @@ ${CENSUS_LEGEND}
     }
     case 'startlog':
       return startLog.length ? `Live backdrop since Prism loaded:\n${startLog.map(startLine).join('\n')}` : 'Nothing logged yet: no live backdrop since Prism loaded.'
+    case 'motion': {
+      const v = value.toLowerCase()
+      if (!['on', 'off'].includes(v)) return `Usage: /prism motion on|off — now ${motionOff ? 'off' : 'on'}`
+      motionOff = v === 'off'
+      await $.store.set('motionOff', motionOff)
+      $.ui.invalidate('ui.render')
+      return motionOff
+        ? 'Motion off: a live wallpaper holds still on its picture. /prism motion on brings the motion back.'
+        : 'Motion on: the live wallpaper moves again.'
+    }
     case 'livedebug': {
       const v = value.toLowerCase()
       if (!['on', 'off'].includes(v)) return `Usage: /prism livedebug on|off — now ${liveDebug ? 'on' : 'off'}`
@@ -826,6 +839,7 @@ export const register: Register = on => {
     const cs = await $.store.get('census').catch(() => '')
     census = cs === 'bare' || cs === 'shader' ? cs : ''
     native = (await $.store.get('native').catch(() => false)) === true
+    motionOff = (await $.store.get('motionOff').catch(() => false)) === true
     const ch = await $.store.get('channel').catch(() => null) as { kind?: unknown; step?: unknown } | null
     channel = ch && CHANNEL_KINDS.includes(ch.kind as ChannelKind) && typeof ch.step === 'number' ? { kind: ch.kind as ChannelKind, step: ch.step } : undefined
     const probe = await $.store.get('probeCells').catch(() => 0)
@@ -941,7 +955,7 @@ export const register: Register = on => {
       if (liveScene.native) return <Svg source={liveSource(liveScene.source)} alt={alt} />
       if ('Shader' in els && liveScene.key) {
         const { Shader } = els
-        return <Shader module="./live-key.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveSource(liveScene.source)} alt={alt} /></Shader>
+        return <Shader module="./live-key.ts" values={{ debug: liveDebug ? 1 : 0, hold: motionOff ? 1 : 0 }}><Svg source={liveSource(liveScene.source)} alt={alt} /></Shader>
       }
       if ('Shader' in els && liveScene.generic) {
         const { Shader } = els

@@ -111,6 +111,7 @@ paints the colours and the backdrop.
 | `/prism use <id>` | switch theme for this session |
 | `/prism bg <file or folder>` | your own background: a picture, an animated SVG, a video, a folder of pictures (a slideshow), or a folder holding one video (a Wallpaper Engine wallpaper) |
 | `/prism bg off` | back to the theme's own background |
+| `/prism motion off`, `/prism motion on` | a live wallpaper holds still on its picture, or moves again |
 | `/prism set` | list every adjustable part, its value and its range (see below) |
 | `/prism set <key> <value>` | change one, e.g. `/prism set panels.blur 0` |
 | `/prism reset <key>`, `/prism reset all` | back to the defaults |
