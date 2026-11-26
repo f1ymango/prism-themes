@@ -13,7 +13,7 @@
 // pic keeps the planes), 105..152 chroma rebuild (tiles of 10 x 2), 153..164 paint a 64-row band a frame from the
 // bottom up (the chroma planes sit in the top rows, so they outlast their use), 154..177 deblock a 32-row window a
 // frame, 178 CDEF directions (CD), 179..202 CDEF a 32-row band a frame from the bottom up, 203 done. Until a band is painted the
-// window shows the Svg's flat colour.
+// window shows the loading preview the parcel carries (blurred, see thumbCell), or without one the Svg's flat colour.
 import { abs, buffer, clamp, cos, floor, int, max, min, mod, picture, range, scene, shader, signed, sin, size, still, time, unsigned, values, vec2, vec3, vec4, type Buffer, type int as Int } from 'claude-code/shader'
 
 // /prism livedebug: 1 draws the decoder's progress over the top of the window
@@ -960,7 +960,57 @@ const field = (w: Int, shift: number) => {
   const z = int((w >> shift) & 63)
   return signed(int((z >> 1) ^ (0 - (z & 1))))
 }
+// --- the loading preview (converter: notes/live-converter/thumb.mjs) ------------------------------------------------
+// Word 11 'THB' says it is there: luma 16 x 10 in words 1152..1191 (6 bits, 4 a word, row 0 at the top), chroma 8 x 5
+// in 1192..1211 (Co 6 + Cg 6 bits, 2 a word). Until the motion starts, sway holds the preview instead of the motion:
+// in each cell the preview's colour at the cell's centre through a cubic B-spline (luma and chroma each over their own
+// grid), so the picture pass's one linear sample of sway is already a smooth blur; lane w -2 once the preview has
+// arrived, else -1 (the same in every cell, so filtering keeps it).
+const THB = 5523522
+const TY0 = 1152
+const TC0 = 1192
+function thumbY(i: number, j: number): number {
+  const t = clamp(j, 0, 9) * 16 + clamp(i, 0, 15)
+  return unsigned(int((at(TY0 + floor((t + 0.5) / 4)) >> int(18 - 6 * imod(t, 4))) & 63)) * 4 + 2
+}
+function thumbC(i: number, j: number): vec2 {
+  const t = clamp(j, 0, 4) * 8 + clamp(i, 0, 7)
+  const w = at(TC0 + floor((t + 0.5) / 2))
+  const v = imod(t, 2) > 0.5 ? int(w & 4095) : int((w >> 12) & 4095)
+  return vec2((unsigned(int((v >> 6) & 63)) - 32) * 4, (unsigned(int(v & 63)) - 32) * 4)
+}
+/** the cubic B-spline's weight at distance d (|d| <= 2) */
+function bspl(d: number): number {
+  const a = abs(d)
+  return a < 1 ? (4 - 6 * a * a + 3 * a * a * a) / 6 : ((2 - a) * (2 - a) * (2 - a)) / 6
+}
+function thumbCell(cx: number, cy: number): vec4 {
+  let n = 0
+  for (let i = 0; i < 60; i++) n = n + acc.at(vec2(i, 9)).a
+  const flag = signed(at(11)) === THB && n > 59.5 ? -2 : -1
+  const u = (cx + 0.5) / 24
+  const v = 1 - (cy + 0.5) / 14
+  const x = u * 16 - 0.5
+  const y = v * 10 - 0.5
+  const xc = u * 8 - 0.5
+  const yc = v * 5 - 0.5
+  let ly = 0
+  let co = 0
+  let cg = 0
+  for (const j of range(4)) {
+    for (const i of range(4)) {
+      ly = ly + thumbY(floor(x) - 1 + i, floor(y) - 1 + j) * bspl(x - floor(x) + 1 - i) * bspl(y - floor(y) + 1 - j)
+      const c = thumbC(floor(xc) - 1 + i, floor(yc) - 1 + j)
+      const k = bspl(xc - floor(xc) + 1 - i) * bspl(yc - floor(yc) + 1 - j)
+      co = co + c.x * k
+      cg = cg + c.y * k
+    }
+  }
+  return vec4(clamp((ly + co - cg) / 255, 0, 1), clamp((ly + cg) / 255, 0, 1), clamp((ly - co - cg) / 255, 0, 1), flag)
+}
+
 const sway: Buffer = buffer({ size: [24, 14], float: 16, filter: 'linear', wrap: 'clamp' }, q => {
+  if (!done()) return thumbCell(q.cell.x, q.cell.y)
   const n = (13 - q.cell.y) * 24 + q.cell.x
   const loop = max(signed(at(4)), 1000) / 1000
   const fw = max(signed(at(6)), 1)
@@ -976,8 +1026,7 @@ const sway: Buffer = buffer({ size: [24, 14], float: 16, filter: 'linear', wrap:
     dx = dx + ((field(w, 18) * c + field(w, 12) * s) * k) / fw
     dy = dy + ((field(w, 6) * c + field(w, 0) * s) * k) / fh
   }
-  const on = done() ? 1 : 0
-  return vec4(dx * on, dy * on, 0, 1)
+  return vec4(dx, dy, 0, 1)
 })
 
 export default shader({
@@ -990,9 +1039,14 @@ export default shader({
     const fy = min(1, a / aspect)
     const p = vec2(0.5 + (q.uv.x - 0.5) * fx, 0.5 + (q.uv.y - 0.5) * fy)
     const d = sway.sample(p)
-    const c = pic.sample(vec2(p.x - d.x, (CH - PH) / CH + ((p.y + d.y) * PH) / CH))
+    // sway holds the motion (w 1) only once the picture is done; before that, the preview (w < 0)
+    const dx = d.w > 0 ? d.x : 0
+    const dy = d.w > 0 ? d.y : 0
+    const c = pic.sample(vec2(p.x - dx, (CH - PH) / CH + ((p.y + dy) * PH) / CH))
     const flat = scene.sample(vec2(0.99, 0.02))
-    const img = c.a > 0.5 ? vec3(c.x, c.y, c.z) : vec3(flat.x, flat.y, flat.z)
+    let img = vec3(flat.x, flat.y, flat.z)
+    if (c.a > 0.5) img = vec3(c.x, c.y, c.z)
+    else if (d.w < -1.5) img = vec3(d.x, d.y, d.z)
     if (v.debug < 0.5 || q.uv.y < 0.9) return vec4(img.x, img.y, img.z, 1)
     // debug strip: words seen (green, top), then the stage (yellow while decoding, white after, growing)
     const r = ctl.at(vec2(1, 14))

@@ -63,6 +63,86 @@ const LIVE_THEMES = new Set(['m4a1'])
  * shader can attach, and the bare Svg stays until the scene changes; a redraw a few seconds in brings the shader.
  */
 let liveRedraw = 0
+/**
+ * /prism startlog: what happened to the live backdrop since this module loaded, timed from the load (the backdrop
+ * answers, each Backdrop render and whether it was offered a Shader, the redraw). For the startup attach race: a
+ * client's first attach draws no Shader, so the engine sends the bare Svg until the client says it draws one.
+ */
+const startT0 = Date.now()
+const startLog: { at: number; text: string; n: number }[] = []
+function startNote($: EngineInterface, text: string) {
+  const last = startLog[startLog.length - 1]
+  if (last?.text === text) last.n++
+  else startLog.push({ at: Date.now() - startT0, text, n: 1 })
+  if (startLog.length > 60) startLog.splice(1, 1)
+  void $.store.set('startLog', startLog.map(startLine)).catch(() => undefined)
+}
+/**
+ * Draws the live backdrop afresh: a new scene name, and an Svg whose markup differs (liveSource adds an empty group),
+ * since the desktop page makes a new shader player only when the Svg markup or the shader changes (a new scene name
+ * alone keeps the old player; clearing the backdrop for 0.4 s did not reach it either). One pending remount at a time.
+ *
+ * Why it is needed (Desktop 6.28899's backdrop player, PointerBackdrop): while a shader plays, the page stamps
+ * localStorage "backdrop-shader-playing-at" every 250 ms and clears it only on pause, blur or pagehide, which a quit
+ * does not reach. A player starting while that stamp is 3 s to 5 min old takes it for a lost GPU and starts no shader
+ * (the Svg shows). So after a quick restart the wallpaper stays a bare Svg until the stamp is 5 min old, and only a
+ * new player (a remount) tries again. The page's stamp can't be read from here, so the live backdrop keeps a stamp of
+ * its own (liveBeats: one per Prism load, every 10 s) and a session start remounts once the page's rest is over when
+ * the newest stamp is under 5 min old and no other load is still stamping.
+ */
+const REST_MS = 300000
+const BEAT_MS = 10000
+const beatId = Math.random().toString(36).slice(2)
+let beatTimer: unknown
+async function readBeats($: EngineInterface): Promise<Record<string, number>> {
+  const v = await $.store.get('liveBeats').catch(() => undefined)
+  return v && typeof v === 'object' ? { ...(v as Record<string, number>) } : {}
+}
+async function beat($: EngineInterface) {
+  if (!liveScene || liveScene.native) return
+  const all = await readBeats($)
+  const now = Date.now()
+  for (const [k, t] of Object.entries(all)) if (typeof t !== 'number' || now - t > 2 * REST_MS) delete all[k]
+  all[beatId] = now
+  await $.store.set('liveBeats', all).catch(() => undefined)
+}
+/** At a session start with a live backdrop: wait out the page's rest if the last Prism load that drew it just ended. */
+async function remountAfterRest($: EngineInterface, id: string) {
+  const others = async () => Object.entries(await readBeats($)).filter(([k]) => k !== beatId)
+  const before = await others()
+  const last = Math.max(0, ...before.map(([, t]) => t))
+  const age = () => Math.round((Date.now() - last) / 1000)
+  const ends = last + REST_MS + BEAT_MS + 3000
+  if (!last || ends <= Date.now()) {
+    startNote($, `rest check: none (${!last ? 'no earlier stamp' : `last stamp ${age()} s ago`})`)
+    return
+  }
+  // a stamp this young may be a load still drawing (another session) or one a quit just ended: look again after more
+  // than a beat, a living load will have stamped since
+  startNote($, `rest check: last stamp ${age()} s ago, looking again in 25 s`)
+  $.clock.after(2.5 * BEAT_MS, () => void (async () => {
+    const was = new Map(before)
+    const moved = (await others()).some(([k, t]) => t > (was.get(k) ?? 0))
+    if (moved) { startNote($, 'rest check: another load is still drawing it, no remount'); return }
+    const wait = Math.max(0, ends - Date.now())
+    startNote($, `rest check: no stamp since (Desktop quit ${age()} s ago), remount in ${Math.round(wait / 1000)} s`)
+    scheduleRemount($, id, wait, "after Desktop's 5-minute shader rest")
+  })().catch(() => undefined))
+}
+let remountTimer: unknown
+/** The live Svg as drawn: after a remount it ends with an empty group named after the redraw, so its markup is new. */
+const liveSource = (source: string) => (liveRedraw ? source.replace(/<\/svg>\s*$/,`<g id="r${liveRedraw}"/></svg>`) : source)
+function scheduleRemount($: EngineInterface, id: string, ms: number, why: string) {
+  stopTimer(remountTimer)
+  remountTimer = $.clock.after(ms, () => {
+    remountTimer = undefined
+    if (liveScene?.id !== id || liveScene.native) return
+    startNote($, `remount (${why})`)
+    liveRedraw++
+    void applyTheme($, id).catch(() => undefined)
+  })
+}
+const startLine = (e:{ at: number; text: string; n: number }) => `+${(e.at / 1000).toFixed(1)}s ${e.text}${e.n > 1 ? ` (x${e.n})` : ''}`
 let liveScene: { scene: string; source: string; id: string; native: boolean; generic: boolean; key: boolean } | undefined
 /** /prism native on|off: play the live wallpaper from <id>-native.svg, an Svg that moves by itself (no shader). */
 let native = false
@@ -382,6 +462,7 @@ async function applyTheme($: EngineInterface, id: string) {
     const s = await loadSettings($)
     const glass = glassFor(t, { panels: choice(s, 'panels.style') as Panels | undefined, panelTint: num(s, 'panels.tint'), panelBlur: num(s, 'panels.blur') })
     const res = await guard($, 'backdrop', () => setOfficialLook($, { colors, scene, glass, scheme: schemeFor(t) }), 'note')
+    if (liveScene) startNote($, `backdrop ${scene}: ${!res ? 'failed' : res.isDrawn ? 'drawn' : `not drawn (${res.reason ?? '?'})`}`)
     if (res && (res.isDrawn || res.colors)) backdropSet = true
     colorsSent = !!res?.colors
     await update($, tier1, () => (!res ? { isDrawn: false, reason: `this Claude Code could not set one: ${failure('backdrop')}` }
@@ -559,6 +640,8 @@ ${CENSUS_LEGEND}
 /prism census off ends it.`
         : "Census off: the theme's own background is back."
     }
+    case 'startlog':
+      return startLog.length ? `Live backdrop since Prism loaded:\n${startLog.map(startLine).join('\n')}` : 'Nothing logged yet: no live backdrop since Prism loaded.'
     case 'livedebug': {
       const v = value.toLowerCase()
       if (!['on', 'off'].includes(v)) return `Usage: /prism livedebug on|off — now ${liveDebug ? 'on' : 'off'}`
@@ -752,15 +835,12 @@ export const register: Register = on => {
       return reloadLibrary($)
     })
     const saved = rule?.use ?? (await readPayloadId($, t2?.slot).catch(() => undefined)) ?? (await $.store.get('current').catch(() => undefined))
+    startNote($, `session start (Claude Code ${engineVersion ?? '?'})`)
     await guard($, 'apply', () => applyTheme($, typeof saved === 'string' ? saved : 'claude'))
-    if (liveScene && !liveScene.native) {
-      const id = liveScene.id
-      $.clock.after(5000, () => {
-        if (liveScene?.id !== id) return
-        liveRedraw++
-        void applyTheme($, id).catch(() => undefined)
-      })
-    }
+    if (liveScene && !liveScene.native) await remountAfterRest($, liveScene.id).catch(() => undefined)
+    stopTimer(beatTimer)
+    await beat($).catch(() => undefined)
+    beatTimer = $.clock.every(BEAT_MS, () => void beat($).catch(() => undefined))
     stopTimer(ruleTimer)
     ruleTimer = library.rules.some(r => r.time) ? $.clock.every(60000, () => void followRules($).catch(() => undefined)) : undefined
     // Like the Codex port's build check: remember the version Prism last started on cleanly, and say so when an
@@ -776,8 +856,16 @@ export const register: Register = on => {
     return out
   })
 
+  on('session.attach', async ($, e, next) => {
+    const out = await next(e)
+    startNote($, `client attached: ${e.surface} ${e.clientId}`)
+    return out
+  })
+
   on('session.end', async ($, e, next) => {
     stopTimer(ruleTimer)
+    // the beat stays: a quit ends the session too, and the page's shader rest (remountAfterRest) follows a quit
+    stopTimer(beatTimer)
     await removeEvent($, discovery).catch(() => undefined)
     return next(e)
   })
@@ -846,22 +934,24 @@ export const register: Register = on => {
       const { Shader } = els
       return <Shader module="./probe.ts" values={{ n: probeCells }}><Svg source={source} alt="A probe grid" /></Shader>
     }
+    if (liveScene && liveScene.scene !== scene) startNote($, `render ${scene}: not the live scene (${liveScene.scene})`)
     if (liveScene?.scene === scene) {
+      startNote($, `render ${scene}: ${'Shader' in els ? 'Shader offered' : 'no Shader'}`)
       const alt = 'Your background, moving as its video does'
-      if (liveScene.native) return <Svg source={liveScene.source} alt={alt} />
+      if (liveScene.native) return <Svg source={liveSource(liveScene.source)} alt={alt} />
       if ('Shader' in els && liveScene.key) {
         const { Shader } = els
-        return <Shader module="./live-key.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveScene.source} alt={alt} /></Shader>
+        return <Shader module="./live-key.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveSource(liveScene.source)} alt={alt} /></Shader>
       }
       if ('Shader' in els && liveScene.generic) {
         const { Shader } = els
-        return <Shader module="./live.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveScene.source} alt={alt} /></Shader>
+        return <Shader module="./live.ts" values={{ debug: liveDebug ? 1 : 0 }}><Svg source={liveSource(liveScene.source)} alt={alt} /></Shader>
       }
       if ('Shader' in els && liveScene.id === 'm4a1') {
         const { Shader } = els
-        return <Shader module="./live-m4a1.ts"><Svg source={liveScene.source} alt={alt} /></Shader>
+        return <Shader module="./live-m4a1.ts"><Svg source={liveSource(liveScene.source)} alt={alt} /></Shader>
       }
-      return <Svg source={liveScene.source} alt="Your background" />
+      return <Svg source={liveSource(liveScene.source)} alt="Your background" />
     }
     if (officialSvg?.scene === scene) return <Svg source={officialSvg.source} alt="Your background" />
     const t = allThemes().find(x => sceneName('gradient', x.id) === scene || x.id === scene)
