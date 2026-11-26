@@ -177,10 +177,11 @@ The full format, with stylesheets and the attributes they can react to, is in
 ### Live wallpapers
 
 Ask Claude to "make this a live wallpaper" with a video (or a picture). The `make-live-wallpaper` skill runs a
-converter in stages (probe, keyframe, loop, motion, encode, theme), shows you a report with pictures after each
-one so a wrong loop or motion can be fixed before the long encode, and installs the result when you say so. It
+converter in stages (probe, keyframe, loop, motion, layers, light, encode, theme), shows you a report with pictures
+after each one so a wrong loop or motion can be fixed before the encode, and installs the result when you say so. It
 needs Node 22+ and ffmpeg. The stages can also be run by hand; see
 [skills/make-live-wallpaper/SKILL.md](skills/make-live-wallpaper/SKILL.md) and the top of its `scripts/pipeline.mjs`.
+What goes wrong and why (GPU cost, redraws, restarts): [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 Secondary and muted text always keep a WCAG AA contrast (4.5:1) against the theme's background, whatever the palette.
 
@@ -236,6 +237,7 @@ prism-themes`). Your themes folder stays.
 - The official backdrop is not drawn by every Claude Desktop version; until it is, backgrounds need the extension.
 - If an update stops the mod from loading at all, Prism cannot report it: Claude Code lists the plugin error itself.
 - Windows and macOS only.
+- Live wallpapers: see [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 ## Development
 
